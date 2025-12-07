@@ -145,10 +145,7 @@
             <label>Velocidad <span id="v-speed">0.25</span></label>
             <input type="range" id="sl-speed" min="0.05" max="1.5" step="0.05" value="0.25">
         </div>
-        <div class="control-group">
-            <label>Niebla <span id="v-fog">300</span></label>
-            <input type="range" id="sl-fog" min="50" max="1000" step="50" value="300">
-        </div>
+
         <div class="control-group">
             <label>Altura Vuelo <span id="v-height">25</span></label>
             <input type="range" id="sl-height" min="10" max="100" step="5" value="25">
@@ -176,10 +173,7 @@
             <label>Altura Máxima Postes (m) <span id="v-maxPostHeight">10</span></label>
             <input type="range" id="sl-maxPostHeight" min="1" max="25" step="0.5" value="10">
         </div>
-        <div class="control-group">
-            <label>Suavidad de Curvas (0=redondeado, 1=recto) <span id="v-splineTension">0.1</span></label>
-            <input type="range" id="sl-splineTension" min="0" max="1" step="0.05" value="0.1">
-        </div>
+
     </div>
 
     <div id="status">
@@ -210,7 +204,6 @@
         // --- VARIABLES GLOBALES ---
         const CONFIG = {
             speed: 0.25,
-            fog: 300,
             height: 25,
             terrainSize: 300,
             numPosts: 20,
@@ -218,7 +211,7 @@
             preRingDistance: 15,
             maxPostHeight: 10,
             maxPostHeight: 10,
-            splineTension: 0.1,
+            splineTension: 0,
             isNight: false
         };
 
@@ -230,7 +223,6 @@
         // --- ESCENA THREE.JS ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87CEEB);
-        scene.fog = new THREE.Fog(0x87CEEB, 20, CONFIG.fog);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -295,9 +287,6 @@
                 setupSkybox('./nightskybox.jpg');
 
                 // Luces: Oscuridad general, solo glow
-                scene.fog.color.setHex(0x000510);
-                scene.fog.near = 10;
-                scene.fog.far = CONFIG.fog;
 
                 ambientLight.intensity = 0.1;
                 dirLight.intensity = 0.0; // Desactivar luz direccional principal para que resalte el neón
@@ -339,9 +328,6 @@
             } else {
                 // MODO DÍA: Normal
                 setupSkybox('./skybox.jpeg');
-
-                scene.fog.color.setHex(0x87CEEB);
-                scene.fog.near = 20;
 
                 ambientLight.intensity = 0.6;
                 dirLight.intensity = 0.8;
@@ -853,11 +839,6 @@
             CONFIG.speed = parseFloat(e.target.value);
             document.getElementById('v-speed').innerText = CONFIG.speed;
         };
-        document.getElementById('sl-fog').oninput = (e) => {
-            CONFIG.fog = parseFloat(e.target.value);
-            scene.fog.far = CONFIG.fog;
-            document.getElementById('v-fog').innerText = CONFIG.fog;
-        };
         document.getElementById('sl-height').oninput = (e) => {
             CONFIG.height = parseFloat(e.target.value);
             document.getElementById('v-height').innerText = CONFIG.height;
@@ -892,11 +873,6 @@
             CONFIG.maxPostHeight = parseFloat(e.target.value);
             document.getElementById('v-maxPostHeight').innerText = CONFIG.maxPostHeight;
             triggerReload(); // Resetea el sistema cuando cambia la altura máxima
-        };
-        document.getElementById('sl-splineTension').oninput = (e) => {
-            CONFIG.splineTension = parseFloat(e.target.value);
-            document.getElementById('v-splineTension').innerText = CONFIG.splineTension;
-            triggerReload(); // Resetea el sistema cuando cambia la suavidad de curvas
         };
 
         // Evento Modo Nocturno
