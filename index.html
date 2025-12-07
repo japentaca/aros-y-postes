@@ -195,6 +195,15 @@
                 </label>
             </div>
             <div class="control-group">
+                <label>
+                    Mostrar Spline Cámara
+                    <label class="switch">
+                        <input type="checkbox" id="chk-spline">
+                        <span class="slider"></span>
+                    </label>
+                </label>
+            </div>
+            <div class="control-group">
                 <label>Velocidad <span id="v-speed">0.25</span></label>
                 <input type="range" id="sl-speed" min="0.05" max="1.5" step="0.05" value="0.25">
             </div>
@@ -274,7 +283,8 @@
             maxPostHeight: 10,
             maxPostHeight: 10,
             splineTension: 0,
-            isNight: false
+            isNight: false,
+            showSpline: false
         };
 
         // --- VARIABLES FPS ---
@@ -474,6 +484,10 @@
         let playerCurrentTargetIdx = 0;
         let playerNextStartId = 0;
 
+        // Helper visual de la spline
+        let splineHelper = null;
+        let splinePoints = null;
+
         // --- FUNCIONES AUXILIARES ---
         function shuffle(array) {
             const arr = [...array];
@@ -646,6 +660,50 @@
             }
         }
 
+        // --- HELPER VISUAL DE SPLINE ---
+        function updateSplineHelper() {
+            // Limpiar helper anterior
+            if (splineHelper) {
+                scene.remove(splineHelper);
+                splineHelper.geometry.dispose();
+                splineHelper.material.dispose();
+                splineHelper = null;
+            }
+            if (splinePoints) {
+                splinePoints.forEach(sphere => {
+                    scene.remove(sphere);
+                    sphere.geometry.dispose();
+                    sphere.material.dispose();
+                });
+                splinePoints = [];
+            }
+
+            // Si está activado y hay una curva, crear el helper
+            if (CONFIG.showSpline && playerCurve) {
+                // Crear línea de la spline
+                const points = playerCurve.getPoints(100);
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const material = new THREE.LineBasicMaterial({
+                    color: 0xff0000,
+                    linewidth: 2
+                });
+                splineHelper = new THREE.Line(geometry, material);
+                scene.add(splineHelper);
+
+                // Crear puntos de control
+                splinePoints = [];
+                const controlPoints = playerCurve.points;
+                controlPoints.forEach(point => {
+                    const sphereGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+                    const sphereMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+                    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+                    sphere.position.copy(point);
+                    scene.add(sphere);
+                    splinePoints.push(sphere);
+                });
+            }
+        }
+
         // --- SISTEMA PRINCIPAL ---
 
         function startPlayerRound(startId) {
@@ -673,6 +731,9 @@
             playerNextStartId = playerPathIndices[playerPathIndices.length - 1];
             playerCurve = createCurve(startId, playerPathIndices);
             playerProgress = 0;
+
+            // Actualizar helper visual de la spline
+            updateSplineHelper();
 
             updateStatus(`OBJETIVOS: ${playerPathIndices.length}`, "#44aaff");
         }
@@ -941,6 +1002,12 @@
         document.getElementById('chk-theme').onchange = (e) => {
             CONFIG.isNight = e.target.checked;
             updateTheme();
+        };
+
+        // Evento Mostrar Spline
+        document.getElementById('chk-spline').onchange = (e) => {
+            CONFIG.showSpline = e.target.checked;
+            updateSplineHelper();
         };
 
         window.onresize = () => {
