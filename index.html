@@ -488,6 +488,15 @@
         let splineHelper = null;
         let splinePoints = null;
 
+        // Sistema de transición suave del lookAt
+        let lookAtTransition = {
+            active: false,
+            startTime: 0,
+            duration: 3000, // 3 segundos
+            startTarget: new THREE.Vector3(),
+            endTarget: new THREE.Vector3()
+        };
+
         // --- FUNCIONES AUXILIARES ---
         function shuffle(array) {
             const arr = [...array];
@@ -897,18 +906,36 @@
                         const pos = playerCurve.getPointAt(playerProgress);
                         camera.position.copy(pos);
 
-                        // Mirar siempre al próximo aro objetivo
-                        if (playerCurrentTargetIdx < playerPathIndices.length) {
-                            const targetId = playerPathIndices[playerCurrentTargetIdx];
-                            const target = postsData[targetId];
-                            camera.lookAt(target.center);
+                        // Sistema de lookAt con transición suave
+                        let lookAtTarget = new THREE.Vector3();
+
+                        if (lookAtTransition.active) {
+                            // Transición activa: lerp entre look front y próximo objetivo
+                            const elapsed = performance.now() - lookAtTransition.startTime;
+                            const t = Math.min(elapsed / lookAtTransition.duration, 1.0);
+
+                            // Lerp suave entre startTarget (front) y endTarget (próximo aro)
+                            lookAtTarget.lerpVectors(lookAtTransition.startTarget, lookAtTransition.endTarget, t);
+
+                            // Desactivar transición cuando se completa
+                            if (t >= 1.0) {
+                                lookAtTransition.active = false;
+                            }
                         } else {
-                            // Si no hay más objetivos, mirar hacia adelante en la curva
-                            const lookAheadDistance = 3.0;
-                            const lookAtT = Math.min(playerProgress + (lookAheadDistance / len), 1);
-                            const lookAtPos = playerCurve.getPointAt(lookAtT);
-                            camera.lookAt(lookAtPos);
+                            // Comportamiento normal: mirar al próximo aro objetivo
+                            if (playerCurrentTargetIdx < playerPathIndices.length) {
+                                const targetId = playerPathIndices[playerCurrentTargetIdx];
+                                const target = postsData[targetId];
+                                lookAtTarget.copy(target.center);
+                            } else {
+                                // Si no hay más objetivos, mirar hacia adelante en la curva
+                                const lookAheadDistance = 3.0;
+                                const lookAtT = Math.min(playerProgress + (lookAheadDistance / len), 1);
+                                lookAtTarget.copy(playerCurve.getPointAt(lookAtT));
+                            }
                         }
+
+                        camera.lookAt(lookAtTarget);
 
                         if (playerCurrentTargetIdx < playerPathIndices.length) {
                             const targetId = playerPathIndices[playerCurrentTargetIdx];
@@ -927,6 +954,19 @@
                                 playerCurrentTargetIdx++;
                                 const left = playerPathIndices.length - playerCurrentTargetIdx;
                                 updateStatus(`PENDIENTES: ${left}`, "#44aaff");
+
+                                // Iniciar transición suave de lookAt
+                                lookAtTransition.active = true;
+                                lookAtTransition.startTime = performance.now();
+
+                                // Target inicial: el aro que acabamos de pasar (donde la cámara YA estaba mirando)
+                                lookAtTransition.startTarget.copy(target.center);
+
+                                // Target final: centro del próximo aro
+                                if (playerCurrentTargetIdx < playerPathIndices.length) {
+                                    const nextId = playerPathIndices[playerCurrentTargetIdx];
+                                    lookAtTransition.endTarget.copy(postsData[nextId].center);
+                                }
 
                                 // Marcar el siguiente aro como objetivo (azul)
                                 if (playerCurrentTargetIdx < playerPathIndices.length) {
