@@ -25,6 +25,55 @@
             z-index: 20;
             max-height: 90vh;
             overflow-y: auto;
+            transition: max-height 0.3s ease, padding 0.3s ease;
+        }
+
+        #controls.collapsed {
+            max-height: 50px;
+            overflow: hidden;
+            padding-bottom: 15px;
+        }
+
+        #toggle-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        #toggle-header h3 {
+            margin: 0;
+            color: #44aaff;
+            border-bottom: 1px solid #44aaff;
+            flex-grow: 1;
+            padding-bottom: 5px;
+        }
+
+        #toggle-btn {
+            background: none;
+            border: none;
+            color: #44aaff;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+            padding: 0 0 5px 10px;
+            line-height: 1;
+            margin-left: 10px;
+        }
+
+        #controls.collapsed #toggle-btn {
+            transform: rotate(-90deg);
+        }
+
+        .controls-content {
+            transition: opacity 0.3s ease;
+        }
+
+        #controls.collapsed .controls-content {
+            opacity: 0;
+            pointer-events: none;
         }
 
         #fps-counter {
@@ -130,50 +179,54 @@
     <div id="fps-counter">FPS: <span id="fps-value">0</span></div>
 
     <div id="controls">
-        <h3 style="margin-top:0; color:#44aaff; border-bottom:1px solid #44aaff;">CONFIGURACIÓN</h3>
+        <div id="toggle-header">
+            <h3>CONFIGURACIÓN</h3>
+            <button id="toggle-btn" title="Colapsar/Expandir">▼</button>
+        </div>
+        <div class="controls-content">
 
-        <div class="control-group">
-            <label>
-                Modo Nocturno (Neon)
-                <label class="switch">
-                    <input type="checkbox" id="chk-theme">
-                    <span class="slider"></span>
+            <div class="control-group">
+                <label>
+                    Modo Nocturno (Neon)
+                    <label class="switch">
+                        <input type="checkbox" id="chk-theme">
+                        <span class="slider"></span>
+                    </label>
                 </label>
-            </label>
-        </div>
-        <div class="control-group">
-            <label>Velocidad <span id="v-speed">0.25</span></label>
-            <input type="range" id="sl-speed" min="0.05" max="1.5" step="0.05" value="0.25">
-        </div>
+            </div>
+            <div class="control-group">
+                <label>Velocidad <span id="v-speed">0.25</span></label>
+                <input type="range" id="sl-speed" min="0.05" max="1.5" step="0.05" value="0.25">
+            </div>
 
-        <div class="control-group">
-            <label>Altura Vuelo <span id="v-height">25</span></label>
-            <input type="range" id="sl-height" min="10" max="100" step="5" value="25">
-        </div>
+            <div class="control-group">
+                <label>Altura Vuelo <span id="v-height">25</span></label>
+                <input type="range" id="sl-height" min="10" max="100" step="5" value="25">
+            </div>
 
-        <hr style="border-color: #555;">
+            <hr style="border-color: #555;">
 
-        <div class="control-group">
-            <label>Terreno (m) <span id="v-terrain">300</span></label>
-            <input type="range" id="sl-terrain" min="200" max="2000" step="100" value="300">
+            <div class="control-group">
+                <label>Terreno (m) <span id="v-terrain">300</span></label>
+                <input type="range" id="sl-terrain" min="200" max="2000" step="100" value="300">
+            </div>
+            <div class="control-group">
+                <label>Postes <span id="v-posts">20</span></label>
+                <input type="range" id="sl-posts" min="3" max="50" step="1" value="20">
+            </div>
+            <div class="control-group">
+                <label>Rivales <span id="v-balls">5</span></label>
+                <input type="range" id="sl-balls" min="0" max="20" step="1" value="5">
+            </div>
+            <div class="control-group">
+                <label>Distancia Punto Previo (m) <span id="v-preRingDistance">1</span></label>
+                <input type="range" id="sl-preRingDistance" min="1" max="20" step="1" value="15">
+            </div>
+            <div class="control-group">
+                <label>Altura Máxima Postes (m) <span id="v-maxPostHeight">10</span></label>
+                <input type="range" id="sl-maxPostHeight" min="1" max="25" step="0.5" value="10">
+            </div>
         </div>
-        <div class="control-group">
-            <label>Postes <span id="v-posts">20</span></label>
-            <input type="range" id="sl-posts" min="3" max="50" step="1" value="20">
-        </div>
-        <div class="control-group">
-            <label>Rivales <span id="v-balls">5</span></label>
-            <input type="range" id="sl-balls" min="0" max="20" step="1" value="5">
-        </div>
-        <div class="control-group">
-            <label>Distancia Punto Previo (m) <span id="v-preRingDistance">1</span></label>
-            <input type="range" id="sl-preRingDistance" min="1" max="20" step="1" value="15">
-        </div>
-        <div class="control-group">
-            <label>Altura Máxima Postes (m) <span id="v-maxPostHeight">10</span></label>
-            <input type="range" id="sl-maxPostHeight" min="1" max="25" step="0.5" value="10">
-        </div>
-
     </div>
 
     <div id="status">
@@ -193,6 +246,15 @@
         import * as THREE from 'three';
 
         // --- REFERENCIAS UI ---
+        // Toggle Panel Colapsable
+        const toggleBtn = document.getElementById('toggle-btn');
+        const toggleHeader = document.getElementById('toggle-header');
+        const controlsPanel = document.getElementById('controls');
+
+        toggleHeader.addEventListener('click', () => {
+            controlsPanel.classList.toggle('collapsed');
+        });
+
         const statusEl = document.getElementById('status-pill');
         const updateStatus = (msg, color = '#ffff00') => {
             statusEl.innerText = msg;
