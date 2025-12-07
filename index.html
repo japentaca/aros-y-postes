@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Entrenamiento Dron - Skybox Support</title>
+    <title>Cabeza de pelota de Pato</title>
     <style>
         body {
             margin: 0;
@@ -115,7 +115,7 @@
         </div>
         <div class="control-group">
             <label>Distancia Punto Previo (m) <span id="v-preRingDistance">1</span></label>
-            <input type="range" id="sl-preRingDistance" min="1" max="20" step="1" value="1">
+            <input type="range" id="sl-preRingDistance" min="1" max="20" step="1" value="15">
         </div>
     </div>
 
@@ -152,7 +152,7 @@
             terrainSize: 300,
             numPosts: 20,
             numBalls: 5,
-            preRingDistance: 1
+            preRingDistance: 15
         };
 
         // --- VARIABLES FPS ---
@@ -304,7 +304,7 @@
 
             // Punto inicial - posición elevada cerca del poste de inicio
             const startPoint = startPost.center.clone();
-            startPoint.y = Math.max(startPoint.y + 5, CONFIG.height);
+            startPoint.y = CONFIG.height; // Usar directamente la altura configurada
             points.push(startPoint);
 
             for (let id of targetIds) {
@@ -332,19 +332,21 @@
                 // Usar el vector normal del aro para la dirección
                 const direction = post.normal.clone();
 
-                // Punto ANTES del aro (approach) - EXACTAMENTE a la altura del centro
+                // Punto ANTES del aro (approach) - a la altura configurada
                 const beforePoint = post.center.clone()
                     .add(direction.clone().multiplyScalar(-CONFIG.preRingDistance)); // Usar valor del slider
-                // Mantener la misma altura que el centro del aro
+                // Usar la altura configurada del drone, no la del aro
+                beforePoint.y = Math.max(beforePoint.y, CONFIG.height);
                 points.push(beforePoint);
 
-                // Punto en el CENTRO del aro
+                // Punto en el CENTRO del aro - mantener altura del aro para pasar correctamente
                 points.push(post.center.clone());
 
-                // Punto DESPUÉS del aro (exit) - EXACTAMENTE a la altura del centro
+                // Punto DESPUÉS del aro (exit) - volver a la altura configurada
                 const afterPoint = post.center.clone()
                     .add(direction.clone().multiplyScalar(CONFIG.preRingDistance)); // Usar valor del slider
-                // Mantener la misma altura que el centro del aro
+                // Volver a la altura configurada del drone después de pasar el aro
+                afterPoint.y = Math.max(afterPoint.y, CONFIG.height);
                 points.push(afterPoint);
             }
 
@@ -666,6 +668,10 @@
         };
 
         generateWorld();
+
+        // Inicializar valores de display
+        document.getElementById('v-preRingDistance').innerText = CONFIG.preRingDistance;
+
         animate();
 
     </script>
