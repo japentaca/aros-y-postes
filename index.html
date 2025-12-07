@@ -57,6 +57,52 @@
             accent-color: #44aaff;
         }
 
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 20px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #44aaff;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(20px);
+        }
+
         #status {
             position: absolute;
             bottom: 20px;
@@ -86,6 +132,15 @@
     <div id="controls">
         <h3 style="margin-top:0; color:#44aaff; border-bottom:1px solid #44aaff;">CONFIGURACIÓN</h3>
 
+        <div class="control-group">
+            <label>
+                Modo Nocturno (Neon)
+                <label class="switch">
+                    <input type="checkbox" id="chk-theme">
+                    <span class="slider"></span>
+                </label>
+            </label>
+        </div>
         <div class="control-group">
             <label>Velocidad <span id="v-speed">0.25</span></label>
             <input type="range" id="sl-speed" min="0.05" max="1.5" step="0.05" value="0.25">
@@ -162,7 +217,9 @@
             numBalls: 5,
             preRingDistance: 15,
             maxPostHeight: 10,
-            splineTension: 0.1
+            maxPostHeight: 10,
+            splineTension: 0.1,
+            isNight: false
         };
 
         // --- VARIABLES FPS ---
@@ -181,17 +238,14 @@
         renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // --- FUNCIÓN PARA CARGAR SKYBOX (DESDE ARCHIVO LOCAL) ---
-        function setupSkybox() {
+        // --- FUNCIÓN PARA CARGAR SKYBOX ---
+        function setupSkybox(url) {
             const loader = new THREE.ImageLoader();
             loader.setCrossOrigin('anonymous');
 
-            // Usar el archivo skybox.jpeg local
-            const skyboxUrl = './skybox.jpeg';
-
             updateStatus("CARGANDO SKYBOX...", "#ffff00");
 
-            loader.load(skyboxUrl, (image) => {
+            loader.load(url, (image) => {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
 
@@ -232,10 +286,118 @@
             });
         }
 
-        setupSkybox();
+        setupSkybox('./skybox.jpeg');
+
+        // --- SISTEMA DE TEMAS ---
+        function updateTheme() {
+            if (CONFIG.isNight) {
+                // MODO NOCHE: Cyberpunk Neon
+                setupSkybox('./nightskybox.jpg');
+
+                // Luces: Oscuridad general, solo glow
+                scene.fog.color.setHex(0x000510);
+                scene.fog.near = 10;
+                scene.fog.far = CONFIG.fog;
+
+                ambientLight.intensity = 0.1;
+                dirLight.intensity = 0.0; // Desactivar luz direccional principal para que resalte el neón
+
+                // Terreno oscuro
+                if (terrainMesh) {
+                    terrainMesh.visible = !CONFIG.isNight; // Hide solid floor in night
+                    if (!CONFIG.isNight) {
+                        terrainMesh.material.color.setHex(0x55aa55);
+                        terrainMesh.material.emissive.setHex(0x000000);
+                    }
+                }
+
+                if (gridHelper) {
+                    gridHelper.visible = CONFIG.isNight; // Show grid in night
+                }
+
+                // Postes (Pillars) - Hacerlos oscuros con glow suave
+                postMat.color.setHex(0x111111);
+                postMat.emissive.setHex(0x4400cc); // Violeta/Azul oscuro
+                postMat.emissiveIntensity = 0.8;
+
+                // Actualizar objetos dinámicos (Aros)
+                postsData.forEach(p => {
+                    // Mantener el color base del estado del juego (rojo, amarillo, azul)
+                    // Pero hacerlo brillar intensamente
+                    const color = p.mesh.material.color;
+                    p.mesh.material.emissive.copy(color);
+                    p.mesh.material.emissiveIntensity = 2.0;
+                });
+
+                // Actualizar Balones Rivales
+                ballsArray.forEach(b => {
+                    const color = b.mesh.material.color;
+                    b.mesh.material.emissive.copy(color);
+                    b.mesh.material.emissiveIntensity = 2.0;
+                });
+
+            } else {
+                // MODO DÍA: Normal
+                setupSkybox('./skybox.jpeg');
+
+                scene.fog.color.setHex(0x87CEEB);
+                scene.fog.near = 20;
+
+                ambientLight.intensity = 0.6;
+                dirLight.intensity = 0.8;
+
+                if (terrainMesh) {
+                    terrainMesh.visible = !CONFIG.isNight;
+                    if (!CONFIG.isNight) {
+                        terrainMesh.material.color.setHex(0x55aa55);
+                        terrainMesh.material.emissive.setHex(0x000000);
+                    }
+                }
+
+                if (gridHelper) {
+                    gridHelper.visible = CONFIG.isNight;
+                }
+
+                // Postes (Pillars)
+                postMat.color.setHex(0x888888);
+                postMat.emissive.setHex(0x000000);
+
+                // Aros
+                postsData.forEach(p => {
+                    // Restaurar emissive standard
+                    // El juego usa emissive para highlighting, así que debemos tener cuidado.
+                    // En modo día el juego espera controlar el emissive. 
+                    // Restauraremos a un estado base, pero la lógica del juego sobreescribirá cuando sea necesario.
+                    // Por ahora reseteamos a negro o al color de estado si está activo?
+                    // Mejor: reseteamos emissive a negro y dejamos que el juego maneje el brillo de los activos (startPlayerRound/animate lo hacen)
+                    p.mesh.material.emissiveIntensity = 1.0;
+                    // NOTA: animate() setea emissive para activo/pasado. 
+                    // Lo resetearemos a negro aqui, y el juego lo volverá a pintar si es necesario en el siguiente frame.
+                    // Ojo: los aros inactivos tienen amarillo y emissive negro.
+                    // El loop del juego setea:
+                    // Activo: color 0088ff, emissive 004488
+                    // Pasado: color ff0000, emissive 550000
+                    // Inactivo: color ffaa00, emissive 000000
+
+                    // Si solo bajamos la intensidad o reseteamos a negro?
+                    // Vamos a confiar en que el render loop o lógica de juego repinta lo necesario.
+                    // Pero para los inactivos (la mayoría), emissive debe ser negro.
+                    p.mesh.material.emissive.setHex(0x000000);
+
+                    // Re-aplicar estado actual si es el target
+                    // (Es complejo saber cuál es el target desde aquí sin iterar indices, pero el animate loop corre constante)
+                });
+
+                ballsArray.forEach(b => {
+                    b.mesh.material.emissive.setHex(0x000000);
+                });
+            }
+        }
 
         // Luces
-        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        // Luces
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
         dirLight.position.set(100, 200, 100);
         dirLight.castShadow = true;
@@ -252,8 +414,10 @@
         scene.add(postsGroup);
 
         let terrainMesh = null;
+        let gridHelper = null;
         let postsData = [];
         let ballsArray = [];
+        let postMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
 
         // Variables de Vuelo Jugador
         let playerCurve = null;
@@ -484,12 +648,40 @@
             terrainMesh = new THREE.Mesh(planeGeo, planeMat);
             terrainMesh.rotation.x = -Math.PI / 2;
             terrainMesh.receiveShadow = true;
+            terrainMesh.receiveShadow = true;
+            terrainMesh.visible = !CONFIG.isNight; // Initial visibility
             scene.add(terrainMesh);
+
+            // Grid para Night Mode
+            if (gridHelper) {
+                scene.remove(gridHelper);
+                gridHelper.geometry.dispose();
+            }
+            // GridHelper( size, divisions, colorCenterLine, colorGrid )
+            gridHelper = new THREE.GridHelper(CONFIG.terrainSize, CONFIG.terrainSize / 10, 0x00ff00, 0x004400);
+            gridHelper.position.y = 0.1;
+            gridHelper.visible = CONFIG.isNight;
+            scene.add(gridHelper);
+
+            // Re-aplicar tema al generar nuevo mundo si estamos en modo noche
+            if (CONFIG.isNight) {
+                // No necesitamos cambiar material del terreno porque está invisible
+                // Pero si quisieramos mantener propiedaes correctas por si acaso:
+                terrainMesh.material.color.setHex(0x000000);
+            }
 
             // Postes
             const postGeo = new THREE.CylinderGeometry(0.2, 0.2, 10, 8);
             const ringGeo = new THREE.TorusGeometry(1.5, 0.15, 8, 24);
-            const postMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+            // postMat is now global
+
+            // Re-aplicar tema al material de los postes
+            if (CONFIG.isNight) {
+                postMat.color.setHex(0x111111);
+                postMat.emissive.setHex(0x4400cc);
+                postMat.emissiveIntensity = 0.8;
+            }
+
             const ringMatBase = new THREE.MeshStandardMaterial({ color: 0xffaa00 });
 
             // Algoritmo de distribución con distancia mínima
@@ -642,7 +834,13 @@
                 }
             }
 
-            ballsArray.forEach(b => b.update());
+            ballsArray.forEach(b => {
+                b.update();
+                // En modo noche, asegurar que el brillo sigue el color
+                if (CONFIG.isNight) {
+                    b.mesh.material.emissive.copy(b.mesh.material.color);
+                }
+            });
 
             // Actualizar contador de FPS
             updateFPS();
@@ -699,6 +897,12 @@
             CONFIG.splineTension = parseFloat(e.target.value);
             document.getElementById('v-splineTension').innerText = CONFIG.splineTension;
             triggerReload(); // Resetea el sistema cuando cambia la suavidad de curvas
+        };
+
+        // Evento Modo Nocturno
+        document.getElementById('chk-theme').onchange = (e) => {
+            CONFIG.isNight = e.target.checked;
+            updateTheme();
         };
 
         window.onresize = () => {
