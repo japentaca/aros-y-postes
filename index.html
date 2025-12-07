@@ -121,6 +121,10 @@
             <label>Altura Máxima Postes (m) <span id="v-maxPostHeight">10</span></label>
             <input type="range" id="sl-maxPostHeight" min="1" max="25" step="0.5" value="10">
         </div>
+        <div class="control-group">
+            <label>Suavidad de Curvas (0=redondeado, 1=recto) <span id="v-splineTension">0.1</span></label>
+            <input type="range" id="sl-splineTension" min="0" max="1" step="0.05" value="0.1">
+        </div>
     </div>
 
     <div id="status">
@@ -157,7 +161,8 @@
             numPosts: 20,
             numBalls: 5,
             preRingDistance: 15,
-            maxPostHeight: 10
+            maxPostHeight: 10,
+            splineTension: 0.1
         };
 
         // --- VARIABLES FPS ---
@@ -319,6 +324,14 @@
                 // Obtener el último punto agregado
                 const lastPoint = points[points.length - 1];
 
+                // Crear punto de descenso a la mitad de camino al aro
+                const approachMidPoint = new THREE.Vector3(
+                    (lastPoint.x + post.center.x) / 2,
+                    (lastPoint.y + post.center.y) / 2,
+                    (lastPoint.z + post.center.z) / 2
+                );
+                points.push(approachMidPoint);
+
                 // Detectar postes cercanos al camino entre el último punto y este poste
                 const nearbyPosts = findNearbyPostsOnPath(lastPoint, post.center, 4.0); // Umbral de 4 metros
 
@@ -337,29 +350,34 @@
                 // Usar el vector normal del aro para la dirección
                 const direction = post.normal.clone();
 
-                // Punto ANTES del aro (approach) - a la altura configurada
+                // Punto ANTES del aro (approach) - a la misma altura del aro
                 const beforePoint = post.center.clone()
                     .add(direction.clone().multiplyScalar(-CONFIG.preRingDistance)); // Usar valor del slider
-                // Usar la altura configurada del drone, no la del aro
-                beforePoint.y = Math.max(beforePoint.y, CONFIG.height);
+                // Mantener la altura del aro para alinearse correctamente
+                beforePoint.y = post.center.y;
                 points.push(beforePoint);
 
                 // Punto en el CENTRO del aro - mantener altura del aro para pasar correctamente
                 points.push(post.center.clone());
 
-                // Punto DESPUÉS del aro (exit) - volver a la altura configurada
+                // Punto DESPUÉS del aro (exit) - a la misma altura del aro
                 const afterPoint = post.center.clone()
                     .add(direction.clone().multiplyScalar(CONFIG.preRingDistance)); // Usar valor del slider
-                // Volver a la altura configurada del drone después de pasar el aro
-                afterPoint.y = Math.max(afterPoint.y, CONFIG.height);
+                // Mantener la altura del aro para una transición suave
+                afterPoint.y = post.center.y;
                 points.push(afterPoint);
+
+                // Crear punto de ascenso a la altura de vuelo para el siguiente segmento
+                const exitTransitionPoint = afterPoint.clone();
+                exitTransitionPoint.y = CONFIG.height;
+                points.push(exitTransitionPoint);
             }
 
             if (points.length < 2) return null;
 
             // Crear spline suave con Catmull-Rom
             const curve = new THREE.CatmullRomCurve3(points);
-            curve.tension = 0.5; // Ajustar suavidad
+            curve.tension = CONFIG.splineTension; // Usar la tensión configurada
             return curve;
         }
 
@@ -532,7 +550,7 @@
             if (postsData.length > 1) {
                 const startNode = postsData[0];
                 const startPos = startNode.center.clone().sub(startNode.normal.clone().multiplyScalar(15));
-                startPos.y = Math.max(startPos.y, 10);
+                startPos.y = CONFIG.height; // Usar la altura de vuelo configurada, no la altura del aro
                 camera.position.copy(startPos);
                 camera.lookAt(startNode.center);
 
@@ -578,11 +596,18 @@
                         const pos = playerCurve.getPointAt(playerProgress);
                         camera.position.copy(pos);
 
-                        // LookAt Suave (3 metros adelante)
-                        const lookAheadDistance = 3.0;
-                        const lookAtT = Math.min(playerProgress + (lookAheadDistance / len), 1);
-                        const lookAtPos = playerCurve.getPointAt(lookAtT);
-                        camera.lookAt(lookAtPos);
+                        // Mirar siempre al próximo aro objetivo
+                        if (playerCurrentTargetIdx < playerPathIndices.length) {
+                            const targetId = playerPathIndices[playerCurrentTargetIdx];
+                            const target = postsData[targetId];
+                            camera.lookAt(target.center);
+                        } else {
+                            // Si no hay más objetivos, mirar hacia adelante en la curva
+                            const lookAheadDistance = 3.0;
+                            const lookAtT = Math.min(playerProgress + (lookAheadDistance / len), 1);
+                            const lookAtPos = playerCurve.getPointAt(lookAtT);
+                            camera.lookAt(lookAtPos);
+                        }
 
                         if (playerCurrentTargetIdx < playerPathIndices.length) {
                             const targetId = playerPathIndices[playerCurrentTargetIdx];
@@ -669,6 +694,11 @@
             CONFIG.maxPostHeight = parseFloat(e.target.value);
             document.getElementById('v-maxPostHeight').innerText = CONFIG.maxPostHeight;
             triggerReload(); // Resetea el sistema cuando cambia la altura máxima
+        };
+        document.getElementById('sl-splineTension').oninput = (e) => {
+            CONFIG.splineTension = parseFloat(e.target.value);
+            document.getElementById('v-splineTension').innerText = CONFIG.splineTension;
+            triggerReload(); // Resetea el sistema cuando cambia la suavidad de curvas
         };
 
         window.onresize = () => {
