@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrenamiento Dron - Skybox Support</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 250px;
+            background: rgba(0, 20, 40, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            z-index: 20;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        #fps-counter {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 20;
+            border: 1px solid #00ff00;
+        }
+
+        .control-group {
+            margin-bottom: 10px;
+        }
+
+        label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9em;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: #44aaff;
+        }
+
+        #status {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #status-pill {
+            display: inline-block;
+            background: rgba(0, 0, 0, 0.8);
+            color: #ffff00;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-family: monospace;
+            font-size: 1.2em;
+            border: 2px solid #ffff00;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="fps-counter">FPS: <span id="fps-value">0</span></div>
+
+    <div id="controls">
+        <h3 style="margin-top:0; color:#44aaff; border-bottom:1px solid #44aaff;">CONFIGURACIÓN</h3>
+
+        <div class="control-group">
+            <label>Velocidad <span id="v-speed">0.25</span></label>
+            <input type="range" id="sl-speed" min="0.05" max="1.5" step="0.05" value="0.25">
+        </div>
+        <div class="control-group">
+            <label>Niebla <span id="v-fog">300</span></label>
+            <input type="range" id="sl-fog" min="50" max="1000" step="50" value="300">
+        </div>
+        <div class="control-group">
+            <label>Altura Vuelo <span id="v-height">25</span></label>
+            <input type="range" id="sl-height" min="10" max="100" step="5" value="25">
+        </div>
+
+        <hr style="border-color: #555;">
+
+        <div class="control-group">
+            <label>Terreno (m) <span id="v-terrain">300</span></label>
+            <input type="range" id="sl-terrain" min="200" max="2000" step="100" value="300">
+        </div>
+        <div class="control-group">
+            <label>Postes <span id="v-posts">20</span></label>
+            <input type="range" id="sl-posts" min="3" max="50" step="1" value="20">
+        </div>
+        <div class="control-group">
+            <label>Rivales <span id="v-balls">5</span></label>
+            <input type="range" id="sl-balls" min="0" max="20" step="1" value="5">
+        </div>
+    </div>
+
+    <div id="status">
+        <div id="status-pill">CARGANDO...</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- REFERENCIAS UI ---
+        const statusEl = document.getElementById('status-pill');
+        const updateStatus = (msg, color = '#ffff00') => {
+            statusEl.innerText = msg;
+            statusEl.style.color = color;
+            statusEl.style.borderColor = color;
+            console.log(`[STATUS] ${msg}`);
+        };
+
+        // --- VARIABLES GLOBALES ---
+        const CONFIG = {
+            speed: 0.25,
+            fog: 300,
+            height: 25,
+            terrainSize: 300,
+            numPosts: 20,
+            numBalls: 5
+        };
+
+        // --- VARIABLES FPS ---
+        let frameCount = 0;
+        let lastTime = performance.now();
+        let fps = 0;
+
+        // --- ESCENA THREE.JS ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 20, CONFIG.fog);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- FUNCIÓN PARA CARGAR SKYBOX (DESDE ARCHIVO LOCAL) ---
+        function setupSkybox() {
+            const loader = new THREE.ImageLoader();
+            loader.setCrossOrigin('anonymous');
+
+            // Usar el archivo skybox.jpeg local
+            const skyboxUrl = './skybox.jpeg';
+
+            updateStatus("CARGANDO SKYBOX...", "#ffff00");
+
+            loader.load(skyboxUrl, (image) => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+
+                const tileWidth = image.width / 4;
+                const tileHeight = image.height / 3;
+                canvas.width = tileWidth;
+                canvas.height = tileHeight;
+
+                const getTile = (x, y) => {
+                    ctx.drawImage(image, x * tileWidth, y * tileHeight, tileWidth, tileHeight, 0, 0, tileWidth, tileHeight);
+                    const c = document.createElement('canvas');
+                    c.width = tileWidth;
+                    c.height = tileHeight;
+                    c.getContext('2d').drawImage(canvas, 0, 0);
+                    return c;
+                };
+
+                const faces = [
+                    getTile(2, 1), // px
+                    getTile(0, 1), // nx
+                    getTile(1, 0), // py
+                    getTile(1, 2), // ny
+                    getTile(1, 1), // pz
+                    getTile(3, 1)  // nz
+                ];
+
+                const cubeTexture = new THREE.CubeTexture(faces);
+                cubeTexture.needsUpdate = true;
+                scene.background = cubeTexture;
+                updateStatus("SKYBOX OK", "#00ff00");
+
+                // Pequeño timeout para limpiar mensaje
+                setTimeout(() => updateStatus("LISTO", "#00ff00"), 2000);
+
+            }, undefined, (err) => {
+                console.warn("Error cargando skybox", err);
+                updateStatus("ERROR SKYBOX", "#ff0000");
+            });
+        }
+
+        setupSkybox();
+
+        // Luces
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(100, 200, 100);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -1000;
+        dirLight.shadow.camera.right = 1000;
+        dirLight.shadow.camera.top = 1000;
+        dirLight.shadow.camera.bottom = -1000;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // Grupos y Datos
+        let postsGroup = new THREE.Group();
+        scene.add(postsGroup);
+
+        let terrainMesh = null;
+        let postsData = [];
+        let ballsArray = [];
+
+        // Variables de Vuelo Jugador
+        let playerCurve = null;
+        let playerProgress = 0;
+        let playerPathIndices = [];
+        let playerCurrentTargetIdx = 0;
+        let playerNextStartId = 0;
+
+        // --- FUNCIONES AUXILIARES ---
+        function shuffle(array) {
+            const arr = [...array];
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        // Crear curva de vuelo
+        function createCurve(startId, targetIds) {
+            if (!postsData[startId]) return null;
+
+            const points = [];
+            const startPost = postsData[startId];
+            const farDist = 15;
+
+            // Punto de salida inicial
+            let currentPos = startPost.center.clone().sub(startPost.normal.clone().multiplyScalar(farDist));
+            points.push(currentPos);
+
+            for (let id of targetIds) {
+                const nextPost = postsData[id];
+                if (!nextPost) continue;
+
+                const farEntry = nextPost.center.clone().add(nextPost.normal.clone().multiplyScalar(farDist));
+                const farExit = nextPost.center.clone().sub(nextPost.normal.clone().multiplyScalar(farDist));
+
+                // Punto medio alto (arco)
+                const midPoint = new THREE.Vector3().addVectors(currentPos, farEntry).multiplyScalar(0.5);
+                midPoint.y = Math.max(midPoint.y, CONFIG.height);
+
+                points.push(midPoint);
+                points.push(farEntry);
+                points.push(nextPost.entry);
+                points.push(nextPost.center);
+                points.push(nextPost.exit);
+                points.push(farExit);
+
+                currentPos = farExit;
+            }
+
+            if (points.length < 2) return null;
+            return new THREE.CatmullRomCurve3(points);
+        }
+
+        // --- CLASE DRONE RIVAL ---
+        class DroneBall {
+            constructor(color, startId) {
+                const geo = new THREE.SphereGeometry(0.8, 16, 16);
+                const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3 });
+                this.mesh = new THREE.Mesh(geo, mat);
+                this.mesh.castShadow = true;
+                postsGroup.add(this.mesh);
+
+                this.currentStartId = startId;
+                this.curve = null;
+                this.progress = 0;
+
+                this.planNewRoute();
+            }
+
+            planNewRoute() {
+                if (postsData.length < 2) return;
+
+                const available = postsData.map(p => p.id).filter(id => id !== this.currentStartId);
+                const routeIds = shuffle(available);
+
+                this.nextStartId = routeIds[routeIds.length - 1];
+                this.curve = createCurve(this.currentStartId, routeIds);
+                this.progress = 0;
+            }
+
+            update() {
+                if (!this.curve) return;
+
+                const len = this.curve.getLength();
+                if (len < 1) return;
+
+                const step = CONFIG.speed / len;
+                this.progress += step;
+
+                if (this.progress >= 1) {
+                    this.currentStartId = this.nextStartId;
+                    this.planNewRoute();
+                } else {
+                    this.mesh.position.copy(this.curve.getPointAt(this.progress));
+                }
+            }
+        }
+
+        // --- SISTEMA PRINCIPAL ---
+
+        function startPlayerRound(startId) {
+            // Limpiar colores
+            postsData.forEach(p => {
+                p.mesh.material.color.setHex(0xffaa00); // Amarillo
+                p.mesh.material.emissive.setHex(0x000000);
+            });
+
+            const available = postsData.map(p => p.id).filter(id => id !== startId);
+            playerPathIndices = shuffle(available);
+
+            if (playerPathIndices.length === 0) {
+                updateStatus("ERROR: NO HAY SUFICIENTES POSTES", "#ff0000");
+                return;
+            }
+
+            // Marcar primer objetivo
+            playerCurrentTargetIdx = 0;
+            const firstId = playerPathIndices[0];
+            postsData[firstId].mesh.material.color.setHex(0x0088ff); // Azul
+            postsData[firstId].mesh.material.emissive.setHex(0x004488);
+
+            // Generar curva
+            playerNextStartId = playerPathIndices[playerPathIndices.length - 1];
+            playerCurve = createCurve(startId, playerPathIndices);
+            playerProgress = 0;
+
+            updateStatus(`OBJETIVOS: ${playerPathIndices.length}`, "#44aaff");
+        }
+
+        function generateWorld() {
+            updateStatus("GENERANDO MUNDO...", "#ffff00");
+
+            if (terrainMesh) {
+                scene.remove(terrainMesh);
+                terrainMesh.geometry.dispose();
+            }
+            while (postsGroup.children.length > 0) {
+                postsGroup.remove(postsGroup.children[0]);
+            }
+            postsData = [];
+            ballsArray = [];
+
+            // Terreno
+            const planeGeo = new THREE.PlaneGeometry(CONFIG.terrainSize, CONFIG.terrainSize);
+            const planeMat = new THREE.MeshStandardMaterial({ color: 0x55aa55, roughness: 0.8 });
+            terrainMesh = new THREE.Mesh(planeGeo, planeMat);
+            terrainMesh.rotation.x = -Math.PI / 2;
+            terrainMesh.receiveShadow = true;
+            scene.add(terrainMesh);
+
+            // Postes
+            const postGeo = new THREE.CylinderGeometry(0.2, 0.2, 10, 8);
+            const ringGeo = new THREE.TorusGeometry(1.5, 0.15, 8, 24);
+            const postMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+            const ringMatBase = new THREE.MeshStandardMaterial({ color: 0xffaa00 });
+
+            // Algoritmo de distribución con distancia mínima
+            const minDistance = 10; // Distancia mínima entre postes en metros
+            const maxRadius = CONFIG.terrainSize * 0.45; // 45% del tamaño del terreno para evitar bordes
+            const postPositions = [];
+
+            for (let i = 0; i < CONFIG.numPosts; i++) {
+                let x, z;
+                let attempts = 0;
+                const maxAttempts = 100;
+
+                // Intentar encontrar una posición válida
+                do {
+                    const radius = Math.random() * maxRadius;
+                    const angle = Math.random() * Math.PI * 2;
+                    x = Math.cos(angle) * radius;
+                    z = Math.sin(angle) * radius;
+                    attempts++;
+                } while (attempts < maxAttempts && postPositions.some(pos => {
+                    const distance = Math.sqrt((x - pos.x) ** 2 + (z - pos.z) ** 2);
+                    return distance < minDistance;
+                }));
+
+                // Si no se encontró una posición válida, usar la última generada
+                postPositions.push({ x, z });
+                const h = 6 + Math.random() * 4;
+
+                const post = new THREE.Mesh(postGeo, postMat);
+                post.scale.y = h / 10;
+                post.position.set(x, h / 2, z);
+                post.castShadow = true;
+                postsGroup.add(post);
+
+                const ring = new THREE.Mesh(ringGeo, ringMatBase.clone());
+                const ringY = h + 1.5 + 0.15;
+                ring.position.set(x, ringY, z);
+                ring.rotation.y = Math.random() * Math.PI * 2;
+                postsGroup.add(ring);
+
+                const normal = new THREE.Vector3(0, 0, 1).applyEuler(ring.rotation).normalize();
+                const center = new THREE.Vector3(x, ringY, z);
+                if (normal.dot(center) > 0) normal.negate();
+
+                postsData.push({
+                    id: i,
+                    center: center,
+                    normal: normal,
+                    entry: center.clone().add(normal.clone().multiplyScalar(4)),
+                    exit: center.clone().sub(normal.clone().multiplyScalar(4)),
+                    mesh: ring
+                });
+            }
+
+            if (postsData.length > 1) {
+                const startNode = postsData[0];
+                const startPos = startNode.center.clone().sub(startNode.normal.clone().multiplyScalar(15));
+                startPos.y = Math.max(startPos.y, 10);
+                camera.position.copy(startPos);
+                camera.lookAt(startNode.center);
+
+                startPlayerRound(0);
+            }
+
+            for (let i = 0; i < CONFIG.numBalls; i++) {
+                const color = new THREE.Color().setHSL(Math.random(), 0.8, 0.5);
+                const startId = (i + 1) % CONFIG.numPosts;
+                ballsArray.push(new DroneBall(color, startId));
+            }
+        }
+
+        // --- FUNCIÓN PARA CALCULAR FPS ---
+        function updateFPS() {
+            frameCount++;
+            const currentTime = performance.now();
+            const deltaTime = currentTime - lastTime;
+
+            // Actualizar FPS cada segundo
+            if (deltaTime >= 1000) {
+                fps = Math.round((frameCount * 1000) / deltaTime);
+                document.getElementById('fps-value').textContent = fps;
+                frameCount = 0;
+                lastTime = currentTime;
+            }
+        }
+
+        // --- LOOP DE ANIMACIÓN ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (playerCurve) {
+                const len = playerCurve.getLength();
+                if (len > 1) {
+                    const step = CONFIG.speed / len;
+                    playerProgress += step;
+
+                    if (playerProgress >= 1) {
+                        startPlayerRound(playerNextStartId);
+                    } else {
+                        // Movimiento
+                        const pos = playerCurve.getPointAt(playerProgress);
+                        camera.position.copy(pos);
+
+                        // LookAt Suave (3 metros adelante)
+                        const lookAheadDistance = 3.0;
+                        const lookAtT = Math.min(playerProgress + (lookAheadDistance / len), 1);
+                        const lookAtPos = playerCurve.getPointAt(lookAtT);
+                        camera.lookAt(lookAtPos);
+
+                        if (playerCurrentTargetIdx < playerPathIndices.length) {
+                            const targetId = playerPathIndices[playerCurrentTargetIdx];
+                            const target = postsData[targetId];
+
+                            if (camera.position.distanceTo(target.center) < 3) {
+                                target.mesh.material.color.setHex(0xff0000);
+                                target.mesh.material.emissive.setHex(0x550000);
+
+                                playerCurrentTargetIdx++;
+                                const left = playerPathIndices.length - playerCurrentTargetIdx;
+                                updateStatus(`PENDIENTES: ${left}`, "#44aaff");
+
+                                if (playerCurrentTargetIdx < playerPathIndices.length) {
+                                    const nextId = playerPathIndices[playerCurrentTargetIdx];
+                                    postsData[nextId].mesh.material.color.setHex(0x0088ff);
+                                    postsData[nextId].mesh.material.emissive.setHex(0x004488);
+                                } else {
+                                    updateStatus("¡VUELTA TERMINADA!", "#00ff00");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ballsArray.forEach(b => b.update());
+
+            // Actualizar contador de FPS
+            updateFPS();
+
+            renderer.render(scene, camera);
+        }
+
+        // --- EVENTOS UI ---
+        document.getElementById('sl-speed').oninput = (e) => {
+            CONFIG.speed = parseFloat(e.target.value);
+            document.getElementById('v-speed').innerText = CONFIG.speed;
+        };
+        document.getElementById('sl-fog').oninput = (e) => {
+            CONFIG.fog = parseFloat(e.target.value);
+            scene.fog.far = CONFIG.fog;
+            document.getElementById('v-fog').innerText = CONFIG.fog;
+        };
+        document.getElementById('sl-height').oninput = (e) => {
+            CONFIG.height = parseFloat(e.target.value);
+            document.getElementById('v-height').innerText = CONFIG.height;
+        };
+
+        let timer;
+        const triggerReload = () => {
+            clearTimeout(timer);
+            timer = setTimeout(generateWorld, 500);
+        };
+
+        document.getElementById('sl-terrain').oninput = (e) => {
+            CONFIG.terrainSize = parseInt(e.target.value);
+            document.getElementById('v-terrain').innerText = CONFIG.terrainSize;
+            triggerReload();
+        };
+        document.getElementById('sl-posts').oninput = (e) => {
+            CONFIG.numPosts = parseInt(e.target.value);
+            document.getElementById('v-posts').innerText = CONFIG.numPosts;
+            triggerReload();
+        };
+        document.getElementById('sl-balls').oninput = (e) => {
+            CONFIG.numBalls = parseInt(e.target.value);
+            document.getElementById('v-balls').innerText = CONFIG.numBalls;
+            triggerReload();
+        };
+
+        window.onresize = () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        };
+
+        generateWorld();
+        animate();
+
+    </script>
+</body>
+
+</html>
