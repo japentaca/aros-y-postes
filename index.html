@@ -194,7 +194,8 @@
                     </label>
                 </label>
             </div>
-            <div class="control-group">
+            <!-- Checkbox de Mostrar Spline - Comentado visualmente pero funcional -->
+            <div class="control-group" style="display: none;">
                 <label>
                     Mostrar Spline Cámara
                     <label class="switch">
@@ -269,7 +270,7 @@
             statusEl.innerText = msg;
             statusEl.style.color = color;
             statusEl.style.borderColor = color;
-            console.log(`[STATUS] ${msg}`);
+            statusEl.style.borderColor = color;
         };
 
         // --- VARIABLES GLOBALES ---
@@ -574,7 +575,7 @@
                 for (let nearby of nearbyPosts) {
                     // Si el poste cercano no es el destino actual ni el de origen
                     if (nearby.post.id !== id && nearby.post.id !== startId) {
-                        console.log(`[EVASIÓN] Poste ${nearby.post.id} detectado a ${nearby.distance.toFixed(1)}m del camino. Agregando punto de desvío.`);
+
                         // Crear punto de desvío 2 metros por encima del poste
                         const avoidancePoint = nearby.post.center.clone();
                         avoidancePoint.y += Math.max(2, nearby.post.center.y + 2); // Asegurar que el punto de desvío esté por encima del poste
@@ -914,11 +915,15 @@
                             const elapsed = performance.now() - lookAtTransition.startTime;
                             const t = Math.min(elapsed / lookAtTransition.duration, 1.0);
 
+                            // DEBUG: Ver valores del lerp
+
+
                             // Lerp suave entre startTarget (front) y endTarget (próximo aro)
                             lookAtTarget.lerpVectors(lookAtTransition.startTarget, lookAtTransition.endTarget, t);
 
                             // Desactivar transición cuando se completa
                             if (t >= 1.0) {
+
                                 lookAtTransition.active = false;
                             }
                         } else {
@@ -946,6 +951,8 @@
 
                             // Si la cámara está muy cerca del centro del aro (menos de 1.5 metros)
                             if (distanceToCenter < 1.5) {
+
+
                                 // Marcar aro actual como pasado (rojo)
                                 target.mesh.material.color.setHex(0xff0000);
                                 target.mesh.material.emissive.setHex(0x550000);
@@ -959,13 +966,17 @@
                                 lookAtTransition.active = true;
                                 lookAtTransition.startTime = performance.now();
 
-                                // Target inicial: el aro que acabamos de pasar (donde la cámara YA estaba mirando)
-                                lookAtTransition.startTarget.copy(target.center);
+                                // Target inicial: proyectar 20 metros adelante en la dirección actual de la cámara
+                                // Esto evita el "giro" de 180 grados al pasar por el centro del aro anterior
+                                const forward = new THREE.Vector3();
+                                camera.getWorldDirection(forward);
+                                lookAtTransition.startTarget.copy(camera.position).add(forward.multiplyScalar(20));
 
                                 // Target final: centro del próximo aro
                                 if (playerCurrentTargetIdx < playerPathIndices.length) {
                                     const nextId = playerPathIndices[playerCurrentTargetIdx];
                                     lookAtTransition.endTarget.copy(postsData[nextId].center);
+
                                 }
 
                                 // Marcar el siguiente aro como objetivo (azul)
