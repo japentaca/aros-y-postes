@@ -797,18 +797,33 @@
         }
 
         // --- CLASE DRONE RIVAL MEJORADA ---
+        // --- GEOMETRÍA "AVIÓN/PÁJARO" (Bajo CPU) ---
+        // Geometría 'singleton' para todos los drones
+        const birdGeometry = new THREE.ConeGeometry(0.25, 0.8, 5); // Base pentagonal, forma de dardo
+        birdGeometry.rotateX(Math.PI / 2); // La punta del cono (originalmente Y+) ahora apunta a Z+
+        birdGeometry.scale(1.2, 0.3, 1);   // Aplanar Y y ensanchar X para alas
+
         class DroneBall {
             constructor(color, startId) {
-                const geo = new THREE.SphereGeometry(0.8, 16, 16);
-                const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3 });
-                this.mesh = new THREE.Mesh(geo, mat);
+                // Usamos la geometría de pájaro
+                const mat = new THREE.MeshStandardMaterial({
+                    color: color,
+                    roughness: 0.3,
+                    flatShading: true
+                });
+                this.mesh = new THREE.Mesh(birdGeometry, mat);
                 this.mesh.castShadow = true;
+
+                // Random scale between 1x (original) and 2x
+                const s = 1 + Math.random();
+                this.mesh.scale.setScalar(s);
+
                 postsGroup.add(this.mesh);
 
                 this.currentStartId = startId;
                 this.curve = null;
                 this.progress = 0;
-                this.speed = CONFIG.speed * (0.8 + Math.random() * 0.4); // Velocidad variable para cada bola
+                this.speed = CONFIG.speed * (0.8 + Math.random() * 0.4);
                 this.nextStartId = 0;
 
                 this.planNewRoute();
@@ -831,7 +846,6 @@
                 const len = this.curve.getLength();
                 if (len < 1) return;
 
-                // Paso basado en la velocidad individual de la bola
                 const step = this.speed / len;
                 this.progress += step;
 
@@ -839,7 +853,19 @@
                     this.currentStartId = this.nextStartId;
                     this.planNewRoute();
                 } else {
-                    this.mesh.position.copy(this.curve.getPointAt(this.progress));
+                    // Actualizar posición
+                    const point = this.curve.getPointAt(this.progress);
+                    this.mesh.position.copy(point);
+
+                    // --- ORIENTACIÓN ---
+                    // Mirar hacia adelante en la curva
+                    const tangent = this.curve.getTangentAt(this.progress);
+                    if (tangent) {
+                        // lookAt hace que el eje +Z local apunte al target.
+                        // Nuestra geometría tiene la punta en +Z.
+                        const lookTarget = point.clone().add(tangent);
+                        this.mesh.lookAt(lookTarget);
+                    }
                 }
             }
         }
