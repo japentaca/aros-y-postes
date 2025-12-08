@@ -507,6 +507,9 @@
         let splineHelper = null;
         let splinePoints = null;
 
+        // Variable para detectar cruce de plano del aro
+        let previousCameraPosition = new THREE.Vector3();
+
         // Efecto Luciérnagas / Data Particles
         let fireflies = null;
 
@@ -604,8 +607,21 @@
                     }
                 }
 
-                // Usar el vector normal del aro para la dirección
-                const direction = post.normal.clone();
+                // CAMBIO: Usar el normal del aro pero elegir el lado correcto según la aproximación
+                // Calcular vector de aproximación desde el último punto hacia el aro
+                const approachVector = new THREE.Vector3().subVectors(post.center, lastPoint);
+                approachVector.y = 0; // Proyectar al plano horizontal
+
+                // Usar el normal del aro (perpendicular al plano del aro)
+                let direction = post.normal.clone();
+
+                // Determinar si debemos invertir el normal basándonos en el lado de aproximación
+                // Si el dot product es negativo, estamos aproximando desde el lado opuesto al normal
+                const dotProduct = approachVector.normalize().dot(direction);
+                if (dotProduct < 0) {
+                    // Invertir la dirección para aproximar desde el otro lado
+                    direction.negate();
+                }
 
                 // Punto ANTES del aro (approach) - a la misma altura del aro
                 const beforePoint = post.center.clone()
@@ -1534,12 +1550,25 @@
                             const targetId = playerPathIndices[playerCurrentTargetIdx];
                             const target = postsData[targetId];
 
-                            // Detectar cuando la cámara pasa por el aro
-                            const distanceToCenter = camera.position.distanceTo(target.center);
+                            // NUEVA DETECCIÓN: Verificar cruce de plano del aro
+                            // Calcular el plano del aro usando su normal
+                            const ringNormal = target.normal.clone();
+                            const ringCenter = target.center;
 
-                            // Si la cámara está muy cerca del centro del aro (menos de 1.5 metros)
-                            if (distanceToCenter < 1.5) {
+                            // Calcular distancias firmadas al plano del aro para posición actual y previa
+                            // Distancia firmada = dot product of (point - ringCenter) with ringNormal
+                            const currentDist = new THREE.Vector3().subVectors(camera.position, ringCenter).dot(ringNormal);
+                            const previousDist = new THREE.Vector3().subVectors(previousCameraPosition, ringCenter).dot(ringNormal);
 
+                            // Detectar cruce: los signos de las distancias deben ser diferentes
+                            const crossedPlane = (currentDist * previousDist) < 0;
+
+                            // Verificar que el cruce ocurrió cerca del centro del aro (dentro del radio)
+                            const distanceToCenter = camera.position.distanceTo(ringCenter);
+                            const ringRadius = 1.5; // Radio del aro
+
+                            // Si cruzamos el plano Y estamos dentro del radio del aro
+                            if (crossedPlane && distanceToCenter < ringRadius * 1.2) { // 1.2 para dar un margen
 
                                 // Marcar aro actual como pasado (rojo) y apagar fuego
                                 target.mesh.material.color.setHex(0xff0000);
@@ -1608,6 +1637,9 @@
 
             // Actualizar contador de FPS
             updateFPS();
+
+            // Actualizar posición previa de la cámara para detección de cruce en el siguiente frame
+            previousCameraPosition.copy(camera.position);
 
             renderer.render(scene, camera);
         }
