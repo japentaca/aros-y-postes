@@ -695,16 +695,19 @@
                 // Spawn particle at random point on the hoop's circumference
                 const angle = Math.random() * Math.PI * 2;
                 const radius = 1.5; // Hoop radius
-                const offsetX = Math.cos(angle) * radius;
-                const offsetZ = Math.sin(angle) * radius;
 
-                // Rotate offset based on hoop rotation
-                const rotatedX = offsetX * Math.cos(hoopRotation) - offsetZ * Math.sin(hoopRotation);
-                const rotatedZ = offsetX * Math.sin(hoopRotation) + offsetZ * Math.cos(hoopRotation);
+                // Local coordinates on the Vertical Ring (XY plane)
+                const localX = Math.cos(angle) * radius;
+                const localY = Math.sin(angle) * radius;
+                const localZ = (Math.random() - 0.5) * 0.3; // Random thickness
+
+                // Rotate offset based on hoop rotation (Y-axis rotation)
+                const rotatedX = localX * Math.cos(hoopRotation) + localZ * Math.sin(hoopRotation);
+                const rotatedZ = -localX * Math.sin(hoopRotation) + localZ * Math.cos(hoopRotation);
 
                 particle.mesh.position.set(
                     hoopPos.x + rotatedX,
-                    hoopPos.y + (Math.random() - 0.5) * 0.3, // Slight vertical randomness
+                    hoopPos.y + localY,
                     hoopPos.z + rotatedZ
                 );
 
