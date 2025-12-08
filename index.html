@@ -209,6 +209,15 @@
                 </label>
             </div>
             <div class="control-group">
+                <label>Tipo de Curva (Spline)</label>
+                <select id="sl-curveType"
+                    style="width: 100%; margin-top: 5px; background: rgba(0,0,0,0.5); color: white; border: 1px solid #44aaff; padding: 5px; border-radius: 4px;">
+                    <option value="centripetal">Centripetal (Suave)</option>
+                    <option value="catmullrom">Catmull-Rom (Normal)</option>
+                    <option value="chordal" selected>Chordal (Uniforme - Default)</option>
+                </select>
+            </div>
+            <div class="control-group">
                 <label>Velocidad <span id="v-speed">0.25</span></label>
                 <input type="range" id="sl-speed" min="0.05" max="1.5" step="0.05" value="0.25">
             </div>
@@ -288,6 +297,7 @@
             maxPostHeight: 10,
             maxPostHeight: 10,
             splineTension: 0,
+            curveType: 'chordal',
             isNight: false,
             showSpline: false,
             firefliesCount: 2000
@@ -624,6 +634,7 @@
 
             // Crear spline suave con Catmull-Rom
             const curve = new THREE.CatmullRomCurve3(points);
+            curve.curveType = CONFIG.curveType;
             curve.tension = CONFIG.splineTension; // Usar la tensión configurada
             return curve;
         }
@@ -1640,6 +1651,11 @@
             CONFIG.maxPostHeight = parseFloat(e.target.value);
             document.getElementById('v-maxPostHeight').innerText = CONFIG.maxPostHeight;
             triggerReload(); // Resetea el sistema cuando cambia la altura máxima
+        };
+
+        document.getElementById('sl-curveType').onchange = (e) => {
+            CONFIG.curveType = e.target.value;
+            triggerReload();
         };
 
         // Evento Modo Nocturno
