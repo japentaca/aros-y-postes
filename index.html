@@ -719,15 +719,15 @@
             }
 
             update(deltaTime) {
-                if (!this.enabled) return;
-
-                // Spawn new particles - more in night mode for extra glow
-                const spawnRate = CONFIG.isNight ? 8 : 5;
-                for (let i = 0; i < spawnRate; i++) {
-                    this.spawnParticle();
+                // Spawn new particles only when enabled - more in night mode for extra glow
+                if (this.enabled) {
+                    const spawnRate = CONFIG.isNight ? 8 : 5;
+                    for (let i = 0; i < spawnRate; i++) {
+                        this.spawnParticle();
+                    }
                 }
 
-                // Update active particles
+                // Always update active particles (even when disabled) so they can fade out properly
                 this.particlePool.forEach(particle => {
                     if (!particle.active) return;
 
@@ -934,6 +934,14 @@
             while (postsGroup.children.length > 0) {
                 postsGroup.remove(postsGroup.children[0]);
             }
+
+            // Dispose of all fire effects from previous world to prevent ghost particles
+            postsData.forEach(post => {
+                if (post.fireEffect) {
+                    post.fireEffect.dispose();
+                }
+            });
+
             postsData = [];
             ballsArray = [];
 
