@@ -66,16 +66,15 @@ export class LightBeacon {
 
     if (hex === 0xffaa00) {
       // Inactive (Yellow)
-      this.mesh.material.opacity = 0.05;
-      this.mesh.scale.setScalar(0.8);
+      this.mesh.visible = false;
     } else if (hex === 0x0088ff) {
       // Active (Blue) - BEACON!
+      this.mesh.visible = true;
       this.mesh.material.opacity = 0.3;
       this.mesh.scale.setScalar(1.2);
     } else {
       // Passed (Red) or others
-      this.mesh.material.opacity = 0.15;
-      this.mesh.scale.setScalar(1.0);
+      this.mesh.visible = false;
     }
   }
 }
