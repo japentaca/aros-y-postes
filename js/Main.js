@@ -51,8 +51,8 @@ let lookAtTransition = {
   active: false,
   phase: 'none', // 'forward' = keep looking forward, 'search' = transition to next target
   startTime: 0,
-  forwardDuration: 800,  // 0.8 seconds looking forward after passing ring
-  searchDuration: 1500,  // 1.5 seconds to smoothly find next target
+  forwardDuration: 1500,  // 1.5 seconds looking forward after passing ring (más tiempo para estabilizar)
+  searchDuration: 3000,   // 3 seconds to smoothly find next target (transición muy gradual)
   currentLookAt: new THREE.Vector3(),  // Current actual look-at point
   forwardTarget: new THREE.Vector3(),  // Point ahead on the flight path
   nextTarget: new THREE.Vector3()      // Next ring center
@@ -130,8 +130,11 @@ function animate() {
             const searchElapsed = currentTime - lookAtTransition.startTime;
             let t = Math.min(searchElapsed / lookAtTransition.searchDuration, 1.0);
 
-            // Easing suave (ease-out-cubic) - empieza rápido, termina suave como "encontrando" el objetivo
-            t = 1 - Math.pow(1 - t, 3);
+            // Easing ease-in-out-quintic - extremadamente suave, sin cambios bruscos
+            // Empieza lento, acelera en el medio, termina lento
+            t = t < 0.5
+              ? 16 * t * t * t * t * t
+              : 1 - Math.pow(-2 * t + 2, 5) / 2;
 
             // Lerp directo desde la posición horizontal guardada hacia el próximo aro
             // No seguimos el spline, solo transicionamos suavemente la mirada
