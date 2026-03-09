@@ -106,8 +106,8 @@ export function createSimpleSplinePath(startId, targetIds) {
 
   // Crear spline suave con Catmull-Rom
   const curve = new THREE.CatmullRomCurve3(points);
-  curve.curveType = CONFIG.curveType;
-  curve.tension = CONFIG.splineTension; // Usar la tensión configurada
+  curve.curveType = 'chordal';
+  curve.tension = CONFIG.splineTension;
   return curve;
 }
 

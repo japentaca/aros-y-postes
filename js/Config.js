@@ -7,7 +7,6 @@ export const CONFIG = {
   preRingDistance: 15,
   maxPostHeight: 10,
   splineTension: 0,
-  curveType: 'chordal',
   isNight: false,
   showSpline: false,
   firefliesCount: 700

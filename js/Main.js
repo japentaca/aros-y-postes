@@ -45,18 +45,12 @@ let fps = 0;
 let lastFrameTime = performance.now();
 let previousCameraPosition = new THREE.Vector3();
 
-// LookAt Transition System - Natural drone/bird-like behavior
-// After passing a ring: keep looking forward, then gradually "search" for next target
-let lookAtTransition = {
-  active: false,
-  phase: 'none', // 'forward' = keep looking forward, 'search' = transition to next target
-  startTime: 0,
-  forwardDuration: 1500,  // 1.5 seconds looking forward after passing ring (más tiempo para estabilizar)
-  searchDuration: 3000,   // 3 seconds to smoothly find next target (transición muy gradual)
-  currentLookAt: new THREE.Vector3(),  // Current actual look-at point
-  forwardTarget: new THREE.Vector3(),  // Point ahead on the flight path
-  nextTarget: new THREE.Vector3()      // Next ring center
-};
+// Smoothed camera look-at: we smooth the DIRECTION (unit vector) from the camera
+// to the target, not the absolute world position. This ensures the camera always
+// looks forward — interpolating world positions breaks when the old target is behind.
+let smoothedLookDir = new THREE.Vector3(0, 0, -1); // unit vector, starts pointing forward
+let smoothedLookInitialized = false;
+const LOOK_AT_SPEED = 0.5; // radians/sec feel. 0.5 = slow bird-like head turn
 
 // --- FPS COUNTER ---
 function updateFPS() {
@@ -84,82 +78,38 @@ function animate() {
       GameState.playerProgress += step;
 
       if (GameState.playerProgress >= 1) {
+        smoothedLookInitialized = false; // Reset so next round snaps to first ring
         startPlayerRound(GameState.playerNextStartId);
       } else {
         // Movimiento
         const pos = GameState.playerCurve.getPointAt(GameState.playerProgress);
         GameState.camera.position.copy(pos);
 
-        // Sistema de lookAt con transición suave tipo drone/pájaro
-        let lookAtTarget = new THREE.Vector3();
+        // Smooth camera look direction — compute the raw direction TO the current target
+        // from the camera's CURRENT position, then slerp toward it.
         const currentTime = performance.now();
-
-        if (lookAtTransition.active) {
-          const elapsed = currentTime - lookAtTransition.startTime;
-
-          if (lookAtTransition.phase === 'forward') {
-            // FASE 1: Seguir mirando hacia adelante HORIZONTALMENTE (como un drone real)
-            // En lugar de seguir la curva del spline (que puede tener ángulos pronunciados),
-            // miramos en la dirección horizontal de vuelo
-
-            // Obtener dirección de vuelo desde la tangente del spline
-            const tangent = GameState.playerCurve.getTangentAt(GameState.playerProgress);
-
-            // Proyectar la tangente en el plano horizontal (ignorar componente Y)
-            const horizontalDir = new THREE.Vector3(tangent.x, 0, tangent.z).normalize();
-
-            // Punto de mira: adelante en dirección horizontal, a la misma altura que la cámara
-            const lookAheadDist = 30.0; // Distancia más larga para estabilidad visual
-            lookAtTransition.forwardTarget.copy(GameState.camera.position)
-              .add(horizontalDir.multiplyScalar(lookAheadDist));
-
-            if (elapsed < lookAtTransition.forwardDuration) {
-              // Mantener mirada hacia adelante horizontalmente
-              lookAtTarget.copy(lookAtTransition.forwardTarget);
-            } else {
-              // Transición a fase de búsqueda
-              lookAtTransition.phase = 'search';
-              lookAtTransition.startTime = currentTime;
-              // Guardar posición actual de mirada para lerp suave
-              lookAtTransition.currentLookAt.copy(lookAtTransition.forwardTarget);
-            }
-          }
-
-          if (lookAtTransition.phase === 'search') {
-            // FASE 2: Transición suave desde mirada horizontal hacia el próximo objetivo
-            const searchElapsed = currentTime - lookAtTransition.startTime;
-            let t = Math.min(searchElapsed / lookAtTransition.searchDuration, 1.0);
-
-            // Easing ease-in-out-quintic - extremadamente suave, sin cambios bruscos
-            // Empieza lento, acelera en el medio, termina lento
-            t = t < 0.5
-              ? 16 * t * t * t * t * t
-              : 1 - Math.pow(-2 * t + 2, 5) / 2;
-
-            // Lerp directo desde la posición horizontal guardada hacia el próximo aro
-            // No seguimos el spline, solo transicionamos suavemente la mirada
-            lookAtTarget.lerpVectors(lookAtTransition.currentLookAt, lookAtTransition.nextTarget, t);
-
-            if (t >= 1.0) {
-              lookAtTransition.active = false;
-              lookAtTransition.phase = 'none';
-            }
-          }
+        const rawLookTarget = new THREE.Vector3();
+        if (GameState.playerCurrentTargetIdx < GameState.playerPathIndices.length) {
+          const targetId = GameState.playerPathIndices[GameState.playerCurrentTargetIdx];
+          rawLookTarget.copy(GameState.postsData[targetId].center);
         } else {
-          // Comportamiento normal: mirar al próximo aro objetivo
-          if (GameState.playerCurrentTargetIdx < GameState.playerPathIndices.length) {
-            const targetId = GameState.playerPathIndices[GameState.playerCurrentTargetIdx];
-            const target = GameState.postsData[targetId];
-            lookAtTarget.copy(target.center);
-          } else {
-            // Si no hay más objetivos, mirar hacia adelante en la curva
-            const lookAheadDistance = 3.0;
-            const lookAtT = Math.min(GameState.playerProgress + (lookAheadDistance / len), 1);
-            lookAtTarget.copy(GameState.playerCurve.getPointAt(lookAtT));
-          }
+          const lookAheadT = Math.min(GameState.playerProgress + (5.0 / len), 1);
+          rawLookTarget.copy(GameState.playerCurve.getPointAt(lookAheadT));
         }
 
-        GameState.camera.lookAt(lookAtTarget);
+        // Direction from camera to target, recomputed every frame from current position
+        const rawDir = rawLookTarget.clone().sub(GameState.camera.position).normalize();
+
+        if (!smoothedLookInitialized) {
+          smoothedLookDir.copy(rawDir);
+          smoothedLookInitialized = true;
+        }
+        const frameMs = currentTime - lastFrameTime;
+        const alpha = 1 - Math.exp(-LOOK_AT_SPEED * frameMs / 1000);
+        // Lerp + renormalize approximates slerp for the small per-frame angles here
+        smoothedLookDir.lerp(rawDir, alpha).normalize();
+
+        GameState.camera.lookAt(GameState.camera.position.clone().add(smoothedLookDir.clone().multiplyScalar(100)));
 
         if (GameState.playerCurrentTargetIdx < GameState.playerPathIndices.length) {
           const targetId = GameState.playerPathIndices[GameState.playerCurrentTargetIdx];
@@ -195,27 +145,13 @@ function animate() {
             const left = GameState.playerPathIndices.length - GameState.playerCurrentTargetIdx;
             updateStatus(`PENDIENTES: ${left}`, "#44aaff");
 
-            // INICIAR TRANSICIÓN: Comportamiento tipo drone - seguir mirando adelante, luego buscar próximo
-            lookAtTransition.active = true;
-            lookAtTransition.phase = 'forward'; // Empezar mirando hacia adelante
-            lookAtTransition.startTime = performance.now();
-
-            // Target final: centro del próximo aro (o punto adelante si no hay más)
+            // Highlight next ring — smoothedLookAt will naturally drift toward it
             if (GameState.playerCurrentTargetIdx < GameState.playerPathIndices.length) {
               const nextId = GameState.playerPathIndices[GameState.playerCurrentTargetIdx];
-              lookAtTransition.nextTarget.copy(GameState.postsData[nextId].center);
-
-              // Marcar el siguiente aro como objetivo (azul) y encender fuego
               GameState.postsData[nextId].mesh.material.color.setHex(0x0088ff);
               GameState.postsData[nextId].mesh.material.emissive.setHex(0x004488);
               GameState.postsData[nextId].fireEffect.enable();
             } else {
-              // Si es el último aro, el nextTarget será hacia adelante
-              const forward = new THREE.Vector3();
-              GameState.camera.getWorldDirection(forward);
-              lookAtTransition.nextTarget.copy(GameState.camera.position).add(forward.multiplyScalar(100));
-
-              // Todos los aros pasados
               updateStatus("¡VUELTA TERMINADA!", "#00ff00");
             }
           }
@@ -317,11 +253,6 @@ document.getElementById('sl-maxPostHeight').oninput = (e) => {
   document.getElementById('v-maxPostHeight').innerText = CONFIG.maxPostHeight;
   triggerReload();
 };
-document.getElementById('sl-curveType').onchange = (e) => {
-  CONFIG.curveType = e.target.value;
-  triggerReload();
-};
-
 // Checkboxes
 document.getElementById('chk-theme').onchange = (e) => {
   CONFIG.isNight = e.target.checked;
