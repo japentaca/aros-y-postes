@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { GameState, updateStatus } from './Globals.js';
 import { CONFIG } from './Config.js';
 
+const NIGHT_ENV_TEXTURE = './espacio-stars-2k.jpg';
+let cachedNightEnvironment = null;
+
 export function setupSkybox(url) {
   const loader = new THREE.ImageLoader();
   loader.setCrossOrigin('anonymous');
@@ -49,10 +52,41 @@ export function setupSkybox(url) {
   });
 }
 
+export function setupNightEnvironment(url = NIGHT_ENV_TEXTURE) {
+  if (cachedNightEnvironment) {
+    GameState.scene.background = cachedNightEnvironment;
+    updateStatus("CIELO NOCTURNO OK", "#00ff00");
+    setTimeout(() => updateStatus("LISTO", "#00ff00"), 2000);
+    return;
+  }
+
+  const loader = new THREE.TextureLoader();
+  loader.setCrossOrigin('anonymous');
+
+  updateStatus("CARGANDO CIELO NOCTURNO...", "#ffff00");
+
+  loader.load(url, (texture) => {
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    cachedNightEnvironment = texture;
+    GameState.scene.background = texture;
+
+    updateStatus("CIELO NOCTURNO OK", "#00ff00");
+    setTimeout(() => updateStatus("LISTO", "#00ff00"), 2000);
+  }, undefined, (err) => {
+    console.warn("Error cargando cielo nocturno", err);
+    updateStatus("ERROR CIELO NOCTURNO", "#ff0000");
+
+    // Fallback al skybox nocturno anterior si la textura falla.
+    setupSkybox('./nightskybox.jpg');
+  });
+}
+
 export function updateTheme(ambientLight, dirLight) {
   if (CONFIG.isNight) {
     // MODO NOCHE: Cyberpunk Neon
-    setupSkybox('./nightskybox.jpg');
+    setupNightEnvironment();
 
     // Luces: Oscuridad general, solo glow
 
