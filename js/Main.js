@@ -56,7 +56,6 @@ const _scratchPos = new THREE.Vector3();
 const _scratchLookAt = new THREE.Vector3();
 const _scratchCurrentDist = new THREE.Vector3();
 const _scratchPreviousDist = new THREE.Vector3();
-const _scratchTotalLength = { v: 0 }; // cache total length across frames
 
 // --- FPS COUNTER ---
 function updateFPS() {
@@ -81,22 +80,23 @@ function updateFPS() {
 // por lo que NO se recalcula un "vector deseado" cada frame: la dirección
 // de mirada es continua y determinística por fase.
 //
-// Velocidad: CONFIG.speed se interpreta como "fracción del recorrido total
-// recorrida por frame" (mismo criterio que la versión basada en spline).
+// Velocidad: CONFIG.speed se interpreta como "unidades de mundo recorridas
+// por frame a 60fps" (mismo criterio que la versión basada en spline, que
+// también avanzaba CONFIG.speed unidades por frame a 60fps). Multiplicar
+// por (dt * 60) hace que la velocidad en m/s (= CONFIG.speed * 60) sea
+// INDEPENDIENTE del segmento activo: no hay diferencias de escala entre
+// APPROACH / PASS_THROUGH / FLIGHT_*.
 function advancePlayer(dt) {
   const segs = GameState.playerSegments;
   if (!segs || segs.length === 0) return;
 
-  // Cachea el largo total mientras no cambien los segmentos
-  if (_scratchTotalLength.v === 0) {
-    for (const s of segs) _scratchTotalLength.v += s.length;
-  }
-  const totalLength = _scratchTotalLength.v;
-  if (totalLength <= 0) return;
-
-  // dt en ms aprox (60fps ≈ 16.67). step = fracción del recorrido / frame.
-  const step = (CONFIG.speed / totalLength) * (dt * 60);
-  const advanceUnits = step * segs[GameState.playerSegmentIdx].length;
+  // Avance por frame en unidades de mundo. CONFIG.speed se interpreta
+  // como "unidades por frame a 60fps" (mismo criterio que la versión con
+  // spline). El factor (dt * 60) independiza del framerate: a 60fps vale
+  // 1, a 30fps vale 2, etc. La velocidad resultante en m/s es
+  // CONFIG.speed * 60, IGUAL para todos los segmentos → no hay
+  // diferencias de escala entre APPROACH / PASS_THROUGH / FLIGHT_*.
+  const advanceUnits = CONFIG.speed * (dt * 60);
   GameState.playerSegmentProgress += advanceUnits;
 
   // Avanza segmentos si el progreso se pasa del actual
@@ -105,8 +105,7 @@ function advancePlayer(dt) {
     GameState.playerSegmentIdx++;
     GameState.playerSegmentProgress = overflow;
     if (GameState.playerSegmentIdx >= segs.length) {
-      // Vuelta terminada: reset de cache y arranque de la siguiente
-      _scratchTotalLength.v = 0;
+      // Vuelta terminada: arranca la siguiente vuelta
       startPlayerRound(GameState.playerNextStartId);
       return;
     }
