@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GameState, updateStatus } from './Globals.js';
 import { CONFIG } from './Config.js';
+import { applyRingMaterialEmissive } from './World.js';
 
 const NIGHT_ENV_TEXTURE = './espacio-stars-2k.jpg';
 let cachedNightEnvironment = null;
@@ -111,14 +112,8 @@ export function updateTheme(ambientLight, dirLight) {
     GameState.postMat.emissive.setHex(0x4400cc); // Violeta/Azul oscuro
     GameState.postMat.emissiveIntensity = 0.8;
 
-    // Actualizar objetos dinámicos (Aros)
-    GameState.postsData.forEach(p => {
-      // Mantener el color base del estado del juego (rojo, amarillo, azul)
-      // Pero hacerlo brillar intensamente
-      const color = p.mesh.material.color;
-      p.mesh.material.emissive.copy(color);
-      p.mesh.material.emissiveIntensity = 2.0;
-    });
+    // Aros: emissive global del material compartido (los colores por instancia se mantienen)
+    applyRingMaterialEmissive(true);
 
     // Actualizar Balones Rivales
     GameState.ballsArray.forEach(b => {
@@ -150,11 +145,8 @@ export function updateTheme(ambientLight, dirLight) {
     GameState.postMat.color.setHex(0x888888);
     GameState.postMat.emissive.setHex(0x000000);
 
-    // Aros
-    GameState.postsData.forEach(p => {
-      p.mesh.material.emissiveIntensity = 1.0;
-      p.mesh.material.emissive.setHex(0x000000);
-    });
+    // Aros: emissive apagado
+    applyRingMaterialEmissive(false);
 
     GameState.ballsArray.forEach(b => {
       b.mesh.material.emissive.setHex(0x000000);

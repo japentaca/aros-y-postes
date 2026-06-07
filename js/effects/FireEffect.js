@@ -2,61 +2,130 @@ import * as THREE from 'three';
 import { GameState } from '../Globals.js';
 import { CONFIG } from '../Config.js';
 
+// Soft circular sprite (shared across all fire effects)
+function createFireSprite() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
+  grad.addColorStop(0.3, 'rgba(255, 255, 255, 0.6)');
+  grad.addColorStop(0.7, 'rgba(255, 255, 255, 0.15)');
+  grad.addColorStop(1.0, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const _fireSprite = createFireSprite();
+
+// Shared GLSL — vertex + fragment for a soft, additive point sprite
+const FIRE_VERT = /* glsl */`
+  attribute vec3 aColor;
+  attribute float aSize;
+  attribute float aAlpha;
+  varying vec3 vColor;
+  varying float vAlpha;
+  uniform float uPixelRatio;
+  void main() {
+    vColor = aColor;
+    vAlpha = aAlpha;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = aSize * uPixelRatio * (300.0 / -mvPosition.z);
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const FIRE_FRAG = /* glsl */`
+  varying vec3 vColor;
+  varying float vAlpha;
+  uniform sampler2D uMap;
+  void main() {
+    vec4 tex = texture2D(uMap, gl_PointCoord);
+    if (tex.a < 0.01) discard;
+    gl_FragColor = vec4(vColor, tex.a * vAlpha);
+  }
+`;
+
 export class FireEffect {
   constructor(hoop) {
-    this.hoop = hoop; // Reference to the hoop mesh
-    this.particles = [];
+    this.hoop = hoop;
     this.enabled = false;
-    this.particlePool = [];
     this.maxParticles = 200;
+    this.spawnCursor = 0;
 
-    // Create particle geometry and material
-    this.particleGeometry = new THREE.SphereGeometry(0.15, 8, 8);
+    // Particle pool state arrays (no per-particle objects)
+    this.life = new Float32Array(this.maxParticles);
+    this.maxLife = new Float32Array(this.maxParticles);
+    this.velX = new Float32Array(this.maxParticles);
+    this.velY = new Float32Array(this.maxParticles);
+    this.velZ = new Float32Array(this.maxParticles);
+    this.posX = new Float32Array(this.maxParticles);
+    this.posY = new Float32Array(this.maxParticles);
+    this.posZ = new Float32Array(this.maxParticles);
+    this.size = new Float32Array(this.maxParticles);
+    this.alpha = new Float32Array(this.maxParticles);
+    this.spawnX = new Float32Array(this.maxParticles);
+    this.spawnZ = new Float32Array(this.maxParticles);
 
-    // Create particles pool for performance
+    // GPU attributes
+    const positions = new Float32Array(this.maxParticles * 3);
+    const colors = new Float32Array(this.maxParticles * 3);
+    const sizes = new Float32Array(this.maxParticles);
+    const alphas = new Float32Array(this.maxParticles);
+    // Hide all initially
     for (let i = 0; i < this.maxParticles; i++) {
-      const material = new THREE.MeshStandardMaterial({
-        color: 0xffaa00,
-        transparent: true,
-        opacity: 1.0,
-        emissive: 0xffaa00,
-        emissiveIntensity: 2.0,
-        roughness: 0.5,
-        metalness: 0.0
-      });
-      const particle = new THREE.Mesh(this.particleGeometry, material);
-      particle.visible = false;
-      GameState.scene.add(particle);
-      this.particlePool.push({
-        mesh: particle,
-        velocity: new THREE.Vector3(),
-        life: 0,
-        maxLife: 0,
-        active: false
-      });
+      positions[i * 3] = 0;
+      positions[i * 3 + 1] = -10000; // far away, off-screen
+      positions[i * 3 + 2] = 0;
+      sizes[i] = 0;
+      alphas[i] = 0;
     }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+    geometry.setAttribute('aAlpha', new THREE.BufferAttribute(alphas, 1));
+    this.geometry = geometry;
+
+    this.material = new THREE.ShaderMaterial({
+      vertexShader: FIRE_VERT,
+      fragmentShader: FIRE_FRAG,
+      uniforms: {
+        uMap: { value: _fireSprite },
+        uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) }
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    this.points = new THREE.Points(this.geometry, this.material);
+    this.points.frustumCulled = false; // particles spread; avoid culling
+    GameState.scene.add(this.points);
   }
 
-  enable() {
-    this.enabled = true;
-  }
+  enable() { this.enabled = true; }
 
   disable() {
     this.enabled = false;
     // Hide all active particles
-    this.particlePool.forEach(p => {
-      p.active = false;
-      p.mesh.visible = false;
-    });
+    for (let i = 0; i < this.maxParticles; i++) {
+      this.life[i] = 0;
+      this.maxLife[i] = 0;
+      this.alpha[i] = 0;
+      this.size[i] = 0;
+    }
+    this.geometry.attributes.aAlpha.needsUpdate = true;
+    this.geometry.attributes.aSize.needsUpdate = true;
   }
 
-  spawnParticle() {
-    // Find inactive particle
-    const particle = this.particlePool.find(p => !p.active);
-    if (!particle) return;
-
-    // Get hoop world position (not local position)
-    const hoopPos = new THREE.Vector3();
+  _spawnParticle(idx) {
+    const hoopPos = _scratchHoopPos;
     this.hoop.getWorldPosition(hoopPos);
     const hoopRotation = this.hoop.rotation.y;
 
@@ -70,109 +139,129 @@ export class FireEffect {
     const localZ = (Math.random() - 0.5) * 0.3; // Random thickness
 
     // Rotate offset based on hoop rotation (Y-axis rotation)
-    const rotatedX = localX * Math.cos(hoopRotation) + localZ * Math.sin(hoopRotation);
-    const rotatedZ = -localX * Math.sin(hoopRotation) + localZ * Math.cos(hoopRotation);
+    const cosR = Math.cos(hoopRotation);
+    const sinR = Math.sin(hoopRotation);
+    const rotatedX = localX * cosR + localZ * sinR;
+    const rotatedZ = -localX * sinR + localZ * cosR;
 
-    particle.mesh.position.set(
-      hoopPos.x + rotatedX,
-      hoopPos.y + localY,
-      hoopPos.z + rotatedZ
-    );
+    this.posX[idx] = hoopPos.x + rotatedX;
+    this.posY[idx] = hoopPos.y + localY;
+    this.posZ[idx] = hoopPos.z + rotatedZ;
+    this.spawnX[idx] = rotatedX;
+    this.spawnZ[idx] = rotatedZ;
 
     // Set initial velocity - upward with outward spread and turbulence
     const spreadForce = 0.5 + Math.random() * 1.5;
-    particle.velocity.set(
-      (Math.random() - 0.5) * spreadForce + rotatedX * 0.1,
-      1.5 + Math.random() * 2.0, // Strong upward force
-      (Math.random() - 0.5) * spreadForce + rotatedZ * 0.1
-    );
+    this.velX[idx] = (Math.random() - 0.5) * spreadForce + rotatedX * 0.1;
+    this.velY[idx] = 1.5 + Math.random() * 2.0;
+    this.velZ[idx] = (Math.random() - 0.5) * spreadForce + rotatedZ * 0.1;
 
-    particle.life = 0;
-    particle.maxLife = 0.8 + Math.random() * 0.7; // 0.8 to 1.5 seconds
-    particle.active = true;
-    particle.mesh.visible = true;
-
-    // Initial color - bright yellow/white
-    particle.mesh.material.color.setHex(0xffff88);
-    particle.mesh.material.emissive.setHex(0xffff88);
-    particle.mesh.material.opacity = 1.0;
-    particle.mesh.scale.setScalar(1.0);
+    this.life[idx] = 0;
+    this.maxLife[idx] = 0.8 + Math.random() * 0.7;
   }
 
   update(deltaTime) {
-    // Spawn new particles only when enabled - more in night mode for extra glow
+    const positions = this.geometry.attributes.position.array;
+    const colors = this.geometry.attributes.aColor.array;
+    const sizes = this.geometry.attributes.aSize.array;
+    const alphas = this.geometry.attributes.aAlpha.array;
+    const isNight = CONFIG.isNight;
+    const baseSize = 1.2;
+    const baseIntensity = isNight ? 3.0 : 2.0;
+
+    // Spawn new particles
     if (this.enabled) {
-      const spawnRate = CONFIG.isNight ? 8 : 5;
-      for (let i = 0; i < spawnRate; i++) {
-        this.spawnParticle();
+      const spawnRate = isNight ? 8 : 5;
+      for (let s = 0; s < spawnRate; s++) {
+        // Find an inactive slot (round-robin is faster)
+        let idx = -1;
+        for (let i = 0; i < this.maxParticles; i++) {
+          const k = (this.spawnCursor + i) % this.maxParticles;
+          if (this.life[k] === 0) { idx = k; break; }
+        }
+        if (idx < 0) break; // pool exhausted
+        this._spawnParticle(idx);
+        this.spawnCursor = (idx + 1) % this.maxParticles;
       }
     }
 
-    // Always update active particles (even when disabled) so they can fade out properly
-    this.particlePool.forEach(particle => {
-      if (!particle.active) return;
-
-      particle.life += deltaTime;
-
-      if (particle.life >= particle.maxLife) {
-        particle.active = false;
-        particle.mesh.visible = false;
-        return;
+    // Update active particles
+    for (let i = 0; i < this.maxParticles; i++) {
+      if (this.life[i] === 0) {
+        alphas[i] = 0;
+        sizes[i] = 0;
+        continue;
       }
 
-      // Calculate life progress (0 to 1)
-      const lifeProgress = particle.life / particle.maxLife;
+      this.life[i] += deltaTime;
+      if (this.life[i] >= this.maxLife[i]) {
+        this.life[i] = 0;
+        alphas[i] = 0;
+        sizes[i] = 0;
+        continue;
+      }
 
-      // Update position
-      particle.mesh.position.add(particle.velocity.clone().multiplyScalar(deltaTime));
+      const t = this.life[i] / this.maxLife[i];
 
-      // Apply gravity and turbulence
-      particle.velocity.y -= 0.5 * deltaTime; // Slight gravity
-      particle.velocity.x += (Math.random() - 0.5) * 2.0 * deltaTime; // Turbulence
-      particle.velocity.z += (Math.random() - 0.5) * 2.0 * deltaTime;
+      // Integrate velocity into position
+      this.posX[i] += this.velX[i] * deltaTime;
+      this.posY[i] += this.velY[i] * deltaTime;
+      this.posZ[i] += this.velZ[i] * deltaTime;
+
+      // Gravity + turbulence
+      this.velY[i] -= 0.5 * deltaTime;
+      this.velX[i] += (Math.random() - 0.5) * 2.0 * deltaTime;
+      this.velZ[i] += (Math.random() - 0.5) * 2.0 * deltaTime;
 
       // Damping
-      particle.velocity.multiplyScalar(0.98);
+      this.velX[i] *= 0.98;
+      this.velY[i] *= 0.98;
+      this.velZ[i] *= 0.98;
 
-      // Color transition: white/yellow -> orange -> red -> dark red/black
-      let color, emissive;
-      if (lifeProgress < 0.2) {
-        // Bright white/yellow core
-        color = new THREE.Color().setHSL(0.15, 1.0, 0.9 - lifeProgress * 2);
-        emissive = color.clone();
-      } else if (lifeProgress < 0.5) {
-        // Orange
-        const t = (lifeProgress - 0.2) / 0.3;
-        color = new THREE.Color().setHSL(0.08 - t * 0.05, 1.0, 0.6 - t * 0.2);
-        emissive = color.clone();
-      } else if (lifeProgress < 0.8) {
-        // Red
-        const t = (lifeProgress - 0.5) / 0.3;
-        color = new THREE.Color().setHSL(0.0, 1.0 - t * 0.3, 0.4 - t * 0.2);
-        emissive = color.clone().multiplyScalar(0.8);
+      // Compute color (reused scratch Color)
+      if (t < 0.2) {
+        _scratchColor.setHSL(0.15, 1.0, 0.9 - t * 2);
+      } else if (t < 0.5) {
+        const k = (t - 0.2) / 0.3;
+        _scratchColor.setHSL(0.08 - k * 0.05, 1.0, 0.6 - k * 0.2);
+      } else if (t < 0.8) {
+        const k = (t - 0.5) / 0.3;
+        _scratchColor.setHSL(0.0, 1.0 - k * 0.3, 0.4 - k * 0.2);
       } else {
-        // Dark red to black
-        const t = (lifeProgress - 0.8) / 0.2;
-        color = new THREE.Color().setHSL(0.0, 0.7 - t * 0.7, 0.2 - t * 0.2);
-        emissive = color.clone().multiplyScalar(0.3);
+        const k = (t - 0.8) / 0.2;
+        _scratchColor.setHSL(0.0, 0.7 - k * 0.7, 0.2 - k * 0.2);
       }
-
-      particle.mesh.material.color.copy(color);
-      particle.mesh.material.emissive.copy(emissive);
-      particle.mesh.material.emissiveIntensity = CONFIG.isNight ? 3.0 : 2.0;
+      // Brightness multiplier (emissive intensity baked into color for additive)
+      const intensity = baseIntensity;
+      colors[i * 3]     = _scratchColor.r * intensity;
+      colors[i * 3 + 1] = _scratchColor.g * intensity;
+      colors[i * 3 + 2] = _scratchColor.b * intensity;
 
       // Fade out and shrink
-      particle.mesh.material.opacity = 1.0 - Math.pow(lifeProgress, 2);
-      particle.mesh.scale.setScalar(1.0 - lifeProgress * 0.5);
-    });
+      alphas[i] = 1.0 - t * t;
+      sizes[i] = baseSize * (1.0 - t * 0.5);
+
+      positions[i * 3]     = this.posX[i];
+      positions[i * 3 + 1] = this.posY[i];
+      positions[i * 3 + 2] = this.posZ[i];
+    }
+
+    this.geometry.attributes.position.needsUpdate = true;
+    this.geometry.attributes.aColor.needsUpdate = true;
+    this.geometry.attributes.aSize.needsUpdate = true;
+    this.geometry.attributes.aAlpha.needsUpdate = true;
   }
 
   dispose() {
-    this.particlePool.forEach(p => {
-      GameState.scene.remove(p.mesh);
-      p.mesh.geometry.dispose();
-      p.mesh.material.dispose();
-    });
-    this.particlePool = [];
+    if (this.points) {
+      GameState.scene.remove(this.points);
+      this.geometry.dispose();
+      this.material.dispose();
+      // _fireSprite es singleton compartido, NO se dispone
+    }
   }
 }
+
+// Module-level scratch (reused across all fire effects)
+const _scratchHoopPos = new THREE.Vector3();
+const _scratchColor = new THREE.Color();

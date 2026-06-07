@@ -108,6 +108,8 @@ export function createSimpleSplinePath(startId, targetIds) {
   const curve = new THREE.CatmullRomCurve3(points);
   curve.curveType = 'chordal';
   curve.tension = CONFIG.splineTension;
+  // Cachear longitud (getLength es costoso; se invoca cada frame en el loop)
+  curve._cachedLength = curve.getLength();
   return curve;
 }
 

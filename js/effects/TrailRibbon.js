@@ -2,10 +2,14 @@ import * as THREE from 'three';
 import { GameState } from '../Globals.js';
 import { CONFIG } from '../Config.js';
 
+// Scratch vectors (compartidos por todas las instancias para evitar GC)
+const _scratchUp = new THREE.Vector3(0, 1, 0);
+const _scratchRight = new THREE.Vector3();
+
 export class TrailRibbon {
   constructor(color) {
-    this.maxPoints = 20;
-    this.width = 0.4;
+    this.maxPoints = 40;
+    this.width = 0.6;
     this.history = []; // Stores { pos: Vector3, normal: Vector3 }
 
     // Initialize BufferGeometry
@@ -51,19 +55,16 @@ export class TrailRibbon {
   }
 
   update(position, direction) {
-    // Add new point to history
-    // We use the direction to calculate the "wing" vector (Right vector)
-    const up = new THREE.Vector3(0, 1, 0);
-    let right = new THREE.Vector3().crossVectors(direction, up).normalize();
-
-    if (right.lengthSq() < 0.1) {
-      // Fallback if direction is vertical
-      right.set(1, 0, 0);
+    // Add new point to history (reused scratch vector to avoid GC)
+    _scratchRight.crossVectors(direction, _scratchUp).normalize();
+    if (_scratchRight.lengthSq() < 0.1) {
+      _scratchRight.set(1, 0, 0);
     }
+    _scratchRight.multiplyScalar(this.width);
 
     this.history.unshift({
-      pos: position.clone(),
-      right: right.multiplyScalar(this.width)
+      posX: position.x, posY: position.y, posZ: position.z,
+      rightX: _scratchRight.x, rightY: _scratchRight.y, rightZ: _scratchRight.z
     });
 
     // Trim history
@@ -77,54 +78,47 @@ export class TrailRibbon {
 
     // Update Geometry
     const positions = this.geometry.attributes.position.array;
+    const histLen = this.history.length;
 
-    // We need to fill the buffer from the HEAD (newest) to TAIL (oldest)
-    // But the Trail should taper or stay constant.
-
-    for (let i = 0; i < this.history.length; i++) {
+    for (let i = 0; i < histLen; i++) {
       const node = this.history[i];
-
       // Taper width at the tail for smoothness
-      const life = 1.0 - (i / this.history.length); // 1.0 at head, 0.0 at tail
-      const currentWidth = node.right.clone().multiplyScalar(life); // Shrink width at tail
-
-      const pLeft = node.pos.clone().sub(currentWidth);
-      const pRight = node.pos.clone().add(currentWidth);
+      const life = 1.0 - (i / histLen); // 1.0 at head, 0.0 at tail
+      const wX = node.rightX * life;
+      const wY = node.rightY * life;
+      const wZ = node.rightZ * life;
 
       const idx = i * 6; // 2 vertices * 3 coords
 
-      positions[idx] = pLeft.x;
-      positions[idx + 1] = pLeft.y;
-      positions[idx + 2] = pLeft.z;
-
-      positions[idx + 3] = pRight.x;
-      positions[idx + 4] = pRight.y;
-      positions[idx + 5] = pRight.z;
+      // Left vertex
+      positions[idx]     = node.posX - wX;
+      positions[idx + 1] = node.posY - wY;
+      positions[idx + 2] = node.posZ - wZ;
+      // Right vertex
+      positions[idx + 3] = node.posX + wX;
+      positions[idx + 4] = node.posY + wY;
+      positions[idx + 5] = node.posZ + wZ;
     }
 
     // Zero out unused vertices (collapse to last point)
-    if (this.history.length < this.maxPoints) {
-      const lastNode = this.history[this.history.length - 1];
-      for (let i = this.history.length; i < this.maxPoints; i++) {
+    if (histLen < this.maxPoints) {
+      const lastNode = this.history[histLen - 1];
+      for (let i = histLen; i < this.maxPoints; i++) {
         const idx = i * 6;
-        positions[idx] = lastNode.pos.x;
-        positions[idx + 1] = lastNode.pos.y;
-        positions[idx + 2] = lastNode.pos.z;
-        positions[idx + 3] = lastNode.pos.x;
-        positions[idx + 4] = lastNode.pos.y;
-        positions[idx + 5] = lastNode.pos.z;
+        positions[idx]     = lastNode.posX;
+        positions[idx + 1] = lastNode.posY;
+        positions[idx + 2] = lastNode.posZ;
+        positions[idx + 3] = lastNode.posX;
+        positions[idx + 4] = lastNode.posY;
+        positions[idx + 5] = lastNode.posZ;
       }
     }
 
     this.geometry.attributes.position.needsUpdate = true;
-    this.geometry.setDrawRange(0, (this.history.length - 1) * 6);
+    this.geometry.setDrawRange(0, (histLen - 1) * 6);
 
     // Night Mode Logic
-    if (CONFIG.isNight) {
-      this.material.opacity = 0.8;
-    } else {
-      this.material.opacity = 0.4;
-    }
+    this.material.opacity = CONFIG.isNight ? 0.8 : 0.4;
   }
 
   dispose() {

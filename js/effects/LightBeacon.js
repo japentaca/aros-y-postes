@@ -43,38 +43,36 @@ export class LightBeacon {
     this.mesh.visible = false;
   }
 
-  update() {
-    // Only visible in Night Mode
+  update(deltaTime = 0.016) {
+    this._time = (this._time || 0) + deltaTime;
+
     if (!CONFIG.isNight) {
       this.mesh.visible = false;
       return;
     }
 
-    this.mesh.visible = true;
-
-    // Sync color with the ring (Poste)
     const ringColor = this.ringMesh.material.color;
     this.mesh.material.color.copy(ringColor);
-
-    // Intensity logic:
-    // Active (Blue) or Passed (Red) -> High Opacity
-    // Inactive (Yellow) -> Low Opacity
-    // We guess state by color hex for simplicity (Yellow is approx 0xffaa00)
-
-    // Get Hex value to check state
     const hex = ringColor.getHex();
 
-    if (hex === 0xffaa00) {
-      // Inactive (Yellow)
-      this.mesh.visible = false;
-    } else if (hex === 0x0088ff) {
-      // Active (Blue) - BEACON!
+    if (hex === 0x0088ff) {
+      // Active (Blue) - animated pulse
       this.mesh.visible = true;
-      this.mesh.material.opacity = 0.3;
-      this.mesh.scale.setScalar(1.2);
+      const pulse = 0.12 + Math.abs(Math.sin(this._time * 2.5)) * 0.38;
+      this.mesh.material.opacity = pulse;
+      const scale = 1.0 + Math.sin(this._time * 1.8) * 0.13;
+      this.mesh.scale.setScalar(scale);
     } else {
-      // Passed (Red) or others
       this.mesh.visible = false;
+    }
+  }
+
+  dispose() {
+    if (this.mesh) {
+      if (this.mesh.parent) this.mesh.parent.remove(this.mesh);
+      // material es clonado por instancia, hay que disponerlo
+      if (this.mesh.material) this.mesh.material.dispose();
+      // beaconGeometry / beaconMaterial / beaconTexture son singleton compartidos, NO se disponen
     }
   }
 }

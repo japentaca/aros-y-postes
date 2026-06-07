@@ -11,6 +11,9 @@ const birdGeometry = new THREE.ConeGeometry(0.25, 0.8, 5); // Base pentagonal, f
 birdGeometry.rotateX(Math.PI / 2); // La punta del cono (originalmente Y+) ahora apunta a Z+
 birdGeometry.scale(1.2, 0.3, 1);   // Aplanar Y y ensanchar X para alas
 
+// Scratch vector (compartido por todas las instancias para evitar GC)
+const _scratchDroneLook = new THREE.Vector3();
+
 export class DroneBall {
   constructor(color, startId) {
     // Usamos la geometría de pájaro
@@ -56,7 +59,7 @@ export class DroneBall {
   update() {
     if (!this.curve) return;
 
-    const len = this.curve.getLength();
+    const len = this.curve._cachedLength ?? this.curve.getLength();
     if (len < 1) return;
 
     const step = this.speed / len;
@@ -77,7 +80,7 @@ export class DroneBall {
       if (tangent) {
         // lookAt hace que el eje +Z local apunte al target.
         // Nuestra geometría tiene la punta en +Z.
-        const lookTarget = point.clone().add(tangent);
+        const lookTarget = _scratchDroneLook.copy(point).add(tangent);
         this.mesh.lookAt(lookTarget);
 
         // Update Trail
@@ -88,5 +91,10 @@ export class DroneBall {
 
   dispose() {
     if (this.trail) this.trail.dispose();
+    if (this.mesh) {
+      if (this.mesh.parent) this.mesh.parent.remove(this.mesh);
+      if (this.mesh.material) this.mesh.material.dispose();
+      // geometría es singleton compartida, NO se dispone
+    }
   }
 }

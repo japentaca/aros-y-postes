@@ -171,6 +171,23 @@
             font-size: 1.2em;
             border: 2px solid #ffff00;
         }
+
+        #vignette {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.45) 100%);
+            z-index: 4;
+        }
+
+        #ring-flash {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            background: radial-gradient(ellipse at center, rgba(120, 210, 255, 0.9) 0%, rgba(120, 210, 255, 0) 65%);
+            opacity: 0;
+            z-index: 5;
+        }
     </style>
 </head>
 
@@ -242,6 +259,9 @@
             </div>
         </div>
     </div>
+
+    <div id="vignette"></div>
+    <div id="ring-flash"></div>
 
     <div id="status">
         <div id="status-pill">CARGANDO...</div>

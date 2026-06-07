@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from './Config.js';
 import { GameState, updateStatus } from './Globals.js';
 import { setupSkybox, updateTheme } from './Theme.js';
-import { generateWorld, startPlayerRound, resetFireflies } from './World.js';
+import { generateWorld, startPlayerRound, resetFireflies, setRingState } from './World.js';
 import { updateSplineHelper } from './Spline.js';
 
 // --- INITIALIZATION ---
@@ -21,13 +21,18 @@ document.body.appendChild(GameState.renderer.domElement);
 // Lights
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 GameState.scene.add(ambientLight);
+const playerLight = new THREE.PointLight(0x88ccff, 3, 50);
+GameState.scene.add(playerLight);
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(100, 200, 100);
 dirLight.castShadow = true;
-dirLight.shadow.camera.left = -1000;
-dirLight.shadow.camera.right = 1000;
-dirLight.shadow.camera.top = 1000;
-dirLight.shadow.camera.bottom = -1000;
+// Frustum ajustado al tamaño del terreno (era ±1000 para 300m → 1 texel/unidad)
+// Ajustamos a CONFIG.terrainSize * 0.6 para tener buena cobertura con margen
+const shadowHalf = CONFIG.terrainSize * 0.6;
+dirLight.shadow.camera.left = -shadowHalf;
+dirLight.shadow.camera.right = shadowHalf;
+dirLight.shadow.camera.top = shadowHalf;
+dirLight.shadow.camera.bottom = -shadowHalf;
 dirLight.shadow.mapSize.width = 2048;
 dirLight.shadow.mapSize.height = 2048;
 GameState.scene.add(dirLight);
@@ -42,15 +47,20 @@ setupSkybox('./skybox.jpeg');
 let frameCount = 0;
 let lastTime = performance.now();
 let fps = 0;
-let lastFrameTime = performance.now();
+let lastFrameTime = -1; // -1 forces initialization on first frame
 let previousCameraPosition = new THREE.Vector3();
 
-// Smoothed camera look-at: we smooth the DIRECTION (unit vector) from the camera
-// to the target, not the absolute world position. This ensures the camera always
-// looks forward — interpolating world positions breaks when the old target is behind.
-let smoothedLookDir = new THREE.Vector3(0, 0, -1); // unit vector, starts pointing forward
-let smoothedLookInitialized = false;
-const LOOK_AT_SPEED = 0.5; // radians/sec feel. 0.5 = slow bird-like head turn
+let lookDir = new THREE.Vector3(0, 0, -1);
+let lookDirReady = false;
+const BIRD_TURN = 0.8; // rad/s — lower = slower bird-like head turns
+const MAX_DELTA = 0.1; // clamp deltaTime to avoid jumps when tab regains focus
+
+// --- SCRATCH OBJECTS (reused every frame to avoid GC pressure) ---
+const _scratchDesiredDir = new THREE.Vector3();
+const _scratchRingNormal = new THREE.Vector3();
+const _scratchCurrentDist = new THREE.Vector3();
+const _scratchPreviousDist = new THREE.Vector3();
+const _scratchLookTarget = new THREE.Vector3();
 
 // --- FPS COUNTER ---
 function updateFPS() {
@@ -72,44 +82,31 @@ function animate() {
   requestAnimationFrame(animate);
 
   if (GameState.playerCurve) {
-    const len = GameState.playerCurve.getLength();
+    const len = GameState.playerCurve._cachedLength ?? GameState.playerCurve.getLength();
     if (len > 1) {
       const step = CONFIG.speed / len;
       GameState.playerProgress += step;
 
       if (GameState.playerProgress >= 1) {
-        smoothedLookInitialized = false; // Reset so next round snaps to first ring
+        lookDirReady = false;
         startPlayerRound(GameState.playerNextStartId);
       } else {
-        // Movimiento
         const pos = GameState.playerCurve.getPointAt(GameState.playerProgress);
         GameState.camera.position.copy(pos);
 
-        // Smooth camera look direction — compute the raw direction TO the current target
-        // from the camera's CURRENT position, then slerp toward it.
-        const currentTime = performance.now();
-        const rawLookTarget = new THREE.Vector3();
+        // Bird-like head turn: smoothly rotate toward the current target ring
         if (GameState.playerCurrentTargetIdx < GameState.playerPathIndices.length) {
-          const targetId = GameState.playerPathIndices[GameState.playerCurrentTargetIdx];
-          rawLookTarget.copy(GameState.postsData[targetId].center);
+          const id = GameState.playerPathIndices[GameState.playerCurrentTargetIdx];
+          _scratchDesiredDir.subVectors(GameState.postsData[id].center, pos).normalize();
         } else {
-          const lookAheadT = Math.min(GameState.playerProgress + (5.0 / len), 1);
-          rawLookTarget.copy(GameState.playerCurve.getPointAt(lookAheadT));
+          _scratchDesiredDir.copy(lookDir); // hold heading when lap ends
         }
-
-        // Direction from camera to target, recomputed every frame from current position
-        const rawDir = rawLookTarget.clone().sub(GameState.camera.position).normalize();
-
-        if (!smoothedLookInitialized) {
-          smoothedLookDir.copy(rawDir);
-          smoothedLookInitialized = true;
-        }
-        const frameMs = currentTime - lastFrameTime;
-        const alpha = 1 - Math.exp(-LOOK_AT_SPEED * frameMs / 1000);
-        // Lerp + renormalize approximates slerp for the small per-frame angles here
-        smoothedLookDir.lerp(rawDir, alpha).normalize();
-
-        GameState.camera.lookAt(GameState.camera.position.clone().add(smoothedLookDir.clone().multiplyScalar(100)));
+        if (!lookDirReady) { lookDir.copy(_scratchDesiredDir); lookDirReady = true; }
+        const frameMs = performance.now() - lastFrameTime;
+        const alpha = 1 - Math.exp(-BIRD_TURN * frameMs / 1000);
+        lookDir.lerp(_scratchDesiredDir, alpha).normalize();
+        _scratchLookTarget.copy(pos).addScaledVector(lookDir, 100);
+        GameState.camera.lookAt(_scratchLookTarget);
 
         if (GameState.playerCurrentTargetIdx < GameState.playerPathIndices.length) {
           const targetId = GameState.playerPathIndices[GameState.playerCurrentTargetIdx];
@@ -119,12 +116,12 @@ function animate() {
           const distanceToRing = GameState.camera.position.distanceTo(target.center);
 
           // DETECCIÓN DE CRUCE: Verificar cruce de plano del aro
-          const ringNormal = target.normal.clone();
+          const ringNormal = target.normal;
           const ringCenter = target.center;
 
-          // Calcular distancias firmadas al plano del aro
-          const currentDist = new THREE.Vector3().subVectors(GameState.camera.position, ringCenter).dot(ringNormal);
-          const previousDist = new THREE.Vector3().subVectors(previousCameraPosition, ringCenter).dot(ringNormal);
+          // Calcular distancias firmadas al plano del aro (reused scratch vectors)
+          const currentDist = _scratchCurrentDist.subVectors(GameState.camera.position, ringCenter).dot(ringNormal);
+          const previousDist = _scratchPreviousDist.subVectors(previousCameraPosition, ringCenter).dot(ringNormal);
 
           // Detectar cruce: los signos de las distancias deben ser diferentes
           const crossedPlane = (currentDist * previousDist) < 0;
@@ -135,10 +132,19 @@ function animate() {
           // Si cruzamos el plano Y estamos dentro del radio del aro
           if (crossedPlane && distanceToRing < ringRadius * 1.2) {
 
+            // Ring crossing flash
+            const flashEl = document.getElementById('ring-flash');
+            if (flashEl) {
+              flashEl.style.transition = 'none';
+              flashEl.style.opacity = '1';
+              requestAnimationFrame(() => {
+                flashEl.style.transition = 'opacity 0.5s ease-out';
+                flashEl.style.opacity = '0';
+              });
+            }
+
             // Marcar aro actual como pasado (rojo) y apagar fuego
-            target.mesh.material.color.setHex(0xff0000);
-            target.mesh.material.emissive.setHex(0x550000);
-            target.fireEffect.disable();
+            setRingState(target, 'PASSED');
 
             // Avanzar al siguiente aro
             GameState.playerCurrentTargetIdx++;
@@ -148,9 +154,7 @@ function animate() {
             // Highlight next ring — smoothedLookAt will naturally drift toward it
             if (GameState.playerCurrentTargetIdx < GameState.playerPathIndices.length) {
               const nextId = GameState.playerPathIndices[GameState.playerCurrentTargetIdx];
-              GameState.postsData[nextId].mesh.material.color.setHex(0x0088ff);
-              GameState.postsData[nextId].mesh.material.emissive.setHex(0x004488);
-              GameState.postsData[nextId].fireEffect.enable();
+              setRingState(GameState.postsData[nextId], 'ACTIVE');
             } else {
               updateStatus("¡VUELTA TERMINADA!", "#00ff00");
             }
@@ -162,21 +166,26 @@ function animate() {
 
   GameState.ballsArray.forEach(b => {
     b.update();
-    // En modo noche, asegurar que el brillo sigue el color
-    if (CONFIG.isNight) {
-      b.mesh.material.emissive.copy(b.mesh.material.color);
-    }
   });
 
   // Calcular deltaTime para animación de partículas
   const currentTime2 = performance.now();
-  const deltaTime = (currentTime2 - lastFrameTime) / 1000; // Convertir a segundos
+  let deltaTime;
+  if (lastFrameTime < 0) {
+    deltaTime = 1 / 60; // primer frame: usar valor razonable
+  } else {
+    deltaTime = (currentTime2 - lastFrameTime) / 1000;
+  }
   lastFrameTime = currentTime2;
+  if (deltaTime > MAX_DELTA) deltaTime = MAX_DELTA; // clamp para evitar saltos al cambiar pestaña
 
-  // Actualizar efectos de fuego Y Beacons
+  // Update player light position
+  playerLight.position.copy(GameState.camera.position);
+
+  // Actualizar efectos de fuego y Beacons (glow halos y discs se actualizan via setRingState)
   GameState.postsData.forEach(p => {
     p.fireEffect.update(deltaTime);
-    if (p.beacon) p.beacon.update();
+    if (p.beacon) p.beacon.update(deltaTime);
   });
 
   // Actualizar Fireflies
