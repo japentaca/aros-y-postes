@@ -79,15 +79,24 @@ export function createCameraPath(startId, targetIds) {
     });
 
     // FLIGHT al siguiente aro, modelado como 2 sub-segmentos rectos:
-    //   FLIGHT_UP:   after[i] → apex    (sube a altura de vuelo)
+    //   FLIGHT_UP:   after[i] → apex      (sube a altura de vuelo)
     //   FLIGHT_DOWN: apex    → before[i+1] (baja a la altura del aro)
     // El ápice es el punto horizontal medio entre after[i] y before[i+1],
     // elevado a CONFIG.height. Esto elimina el riesgo de atravesar postes
-    // altos en vuelo recto. La mirada se interpola linealmente entre
-    // straightAhead del aro actual y el centro del siguiente aro a lo
-    // largo de ambos sub-segmentos (sin recomputación por frame).
+    // altos en vuelo recto.
+    //
+    // Encadenamiento de la mirada (CRÍTICO para que no haya saltos):
+    //   end PASS_THROUGH[i]  = straightAhead[i]
+    //   start FLIGHT_UP      = straightAhead[i]            ← coincide
+    //   end FLIGHT_UP        = ringCenter[i+1]
+    //   start FLIGHT_DOWN    = ringCenter[i+1]             ← coincide
+    //   end FLIGHT_DOWN      = straightAhead[i+1]
+    //   start PASS_THROUGH[i+1] = straightAhead[i+1]       ← coincide
+    // Sin este encadenamiento, el ápice producía un salto violento de
+    // mirada de ringCenter[i+1] a straightAhead[i] (copypaste).
     if (i + 1 < ringData.length) {
       const next = ringData[i + 1];
+      const nextStraightAhead = straightAheadTarget(next.post);
       const apex = new THREE.Vector3(
         (after.x + next.before.x) / 2,
         CONFIG.height,
@@ -107,8 +116,8 @@ export function createCameraPath(startId, targetIds) {
         start: apex.clone(),
         end: next.before.clone(),
         length: apex.distanceTo(next.before),
-        lookAtStart: straightAhead.clone(),
-        lookAtEnd: next.post.center.clone(),
+        lookAtStart: next.post.center.clone(),
+        lookAtEnd: nextStraightAhead.clone(),
         ringId: null
       });
     }
