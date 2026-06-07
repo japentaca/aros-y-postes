@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GameState, updateStatus } from './Globals.js';
 import { CONFIG } from './Config.js';
 import { shuffle } from './Utils.js';
-import { createSimpleSplinePath, updateSplineHelper } from './Spline.js';
+import { createCameraPath, updateSplineHelper } from './Spline.js';
 import { FireEffect } from './effects/FireEffect.js';
 import { LightBeacon } from './effects/LightBeacon.js';
 import { CyberFireflies } from './effects/CyberFireflies.js';
@@ -160,12 +160,13 @@ export function startPlayerRound(startId) {
   const firstId = GameState.playerPathIndices[0];
   setRingState(GameState.postsData[firstId], 'ACTIVE');
 
-  // Generar curva
+  // Generar ruta de segmentos
   GameState.playerNextStartId = GameState.playerPathIndices[GameState.playerPathIndices.length - 1];
-  GameState.playerCurve = createSimpleSplinePath(startId, GameState.playerPathIndices);
-  GameState.playerProgress = 0;
+  GameState.playerSegments = createCameraPath(startId, GameState.playerPathIndices);
+  GameState.playerSegmentIdx = 0;
+  GameState.playerSegmentProgress = 0;
 
-  // Actualizar helper visual de la spline
+  // Actualizar helper visual de la ruta
   updateSplineHelper();
 
   updateStatus(`OBJETIVOS: ${GameState.playerPathIndices.length}`, "#44aaff");
